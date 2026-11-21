@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { DEFAULTS, DesktopSettings, normalize, normalizeBackendUrl } = require('../desktop_settings');
+const { DEFAULTS, DesktopSettings, defaultHotkey, defaultsFor, normalize, normalizeBackendUrl } = require('../desktop_settings');
 
 function tmpFile() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ash-industry-desktop-')), 'sub', 'settings.json');
@@ -15,6 +15,23 @@ test('normalizeBackendUrl keeps only loopback http origins', () => {
   assert.equal(normalizeBackendUrl('http://localhost:8000'), 'http://localhost:8000');
   assert.equal(normalizeBackendUrl('http://evil.example:7777'), null);
   assert.equal(normalizeBackendUrl('file:///etc/passwd'), null);
+});
+
+test('defaultHotkey picks the mac combo on darwin and the Ctrl+Alt combo elsewhere', () => {
+  assert.equal(defaultHotkey('darwin'), 'Command+Control+Shift+Enter');
+  assert.equal(defaultHotkey('win32'), 'Control+Alt+Shift+Enter');
+  assert.equal(defaultHotkey('linux'), 'Control+Alt+Shift+Enter');
+  assert.equal(defaultHotkey(undefined), 'Control+Alt+Shift+Enter');
+  assert.equal(DEFAULTS.hotkey, defaultHotkey(process.platform));
+});
+
+test('normalize fills the injected platform default and keeps a user hotkey', () => {
+  assert.equal(normalize({}, 'darwin').settings.hotkey, 'Command+Control+Shift+Enter');
+  assert.equal(normalize({}, 'win32').settings.hotkey, 'Control+Alt+Shift+Enter');
+  assert.equal(normalize({ hotkey: 'Alt+Space' }, 'darwin').settings.hotkey, 'Alt+Space');
+  const bad = normalize({ hotkey: 'Ctrl+Shift+J; rm' }, 'linux');
+  assert.deepEqual(bad.settings, defaultsFor('linux'));
+  assert.match(bad.errors[0], /Control\+Alt\+Shift\+Enter/);
 });
 
 test('normalize drops unknown keys and reports bad values', () => {

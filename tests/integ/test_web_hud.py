@@ -5,6 +5,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from ash_industry.ash_config import SHORTCUT_PATTERN, ShortcutsConfig  # noqa: E402
 from tests.fixtures.web_hud_helpers import web_assembly, web_client  # noqa: E402
 from ash_industry.ui.web.server import STATIC_DIR  # noqa: E402
 
@@ -85,3 +86,13 @@ def test_shell_assets_are_not_versioned_and_revalidate(client):
     assert "SHELL_VERSION" not in client.get("/sw.js").text
     for path in ("/", "/styles.css", "/app/main.js"):
         assert client.get(path).headers["cache-control"] == "no-cache", path
+
+
+def test_hud_shortcut_module_matches_server_pattern_and_defaults():
+    """화면은 서버 설정을 못 읽으면 자기 기본값을 쓴다. 형식과 기본값이 서버와 어긋나면 저장한 값과 다른 키가 먹는다."""
+    js = (STATIC_DIR / "app" / "shortcut-combo.js").read_text(encoding="utf-8")
+    combo = re.search(r"^export const COMBO = /(.+)/;$", js, re.M)
+    defaults = dict(re.findall(r"^  (\w+): '([^']+)',$", js, re.M))
+
+    assert combo is not None and combo.group(1) == SHORTCUT_PATTERN
+    assert defaults == ShortcutsConfig().model_dump()

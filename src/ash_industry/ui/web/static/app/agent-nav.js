@@ -1,6 +1,8 @@
 // 에이전트 전환 — 구체 좌우의 화살표와 구체 밀기. 구체가 밀려 나가고 다음 에이전트의 구체가 반대편에서 들어온다.
 import { agents, isTeam } from './agents.js';
 import { AGENT_ID } from './brand.js';
+import { onShortcut } from './shortcuts.js';
+import { currentView } from './view.js';
 
 const OUT_MS = 220;
 const IN_MS = 360;
@@ -83,6 +85,16 @@ async function swipe(step) {
 
 $prev.addEventListener('click', () => swipe(-1));
 $next.addEventListener('click', () => swipe(1));
+
+// 단축키(기본 Ctrl+Shift+←, →)는 화살표 클릭과 같다. 글이 든 입력칸에서는 단어 선택 키라 가로채지 않는다
+function swipeByKey(e, step) {
+  const field = e.target instanceof HTMLElement && e.target.closest('input, textarea');
+  if (currentView() !== 'hud' || !isTeam() || (field && field.value !== '')) return false;
+  swipe(step);
+  return true;
+}
+onShortcut('agent_prev', (e) => swipeByKey(e, -1));
+onShortcut('agent_next', (e) => swipeByKey(e, 1));
 
 // 구체를 좌우로 밀면 전환한다. 짧게 누르면 그대로 클릭(듣기)이다
 let _start = null;

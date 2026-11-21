@@ -59,6 +59,34 @@ def test_put_settings_reports_restart_required_for_thought_enabled(client, setti
     assert client.get("/api/settings").json()["editable"]["thought"]["enabled"] is True
 
 
+def test_put_settings_saves_hud_shortcuts_and_get_returns_them(client, settings_file):
+    payload = {"shortcuts": {"voice_start": "Alt+Space", "agent_next": "Ctrl+Shift+N"}}
+
+    first = client.put("/api/settings", json=payload).json()
+    again = client.put("/api/settings", json=payload).json()
+    shown = client.get("/api/settings").json()
+
+    assert first["changed"] is True and again["changed"] is False and again["applied"] == []
+    assert sorted(first["applied"]) == ["shortcuts.agent_next", "shortcuts.voice_start"]
+    assert first["restart_required"] is False
+    assert shown["editable"]["shortcuts"] == {
+        "voice_start": "Alt+Space", "voice_stop": "Escape",
+        "agent_prev": "Ctrl+Shift+ArrowLeft", "agent_next": "Ctrl+Shift+N",
+    }
+    assert shown["fields"]["shortcuts"]["voice_stop"]["type"] == "string"
+    assert AshSettings().shortcuts.voice_start == "Alt+Space"
+
+
+def test_put_settings_rejects_duplicate_or_malformed_shortcuts(client, settings_file):
+    dup = client.put("/api/settings", json={"shortcuts": {"agent_prev": "Escape"}})
+    bad = client.put("/api/settings", json={"shortcuts": {"voice_stop": "Cmd+J"}})
+
+    assert (dup.status_code, bad.status_code) == (422, 422)
+    assert "겹칩니다" in dup.json()["detail"][0]["msg"]
+    assert not settings_file.exists()
+    assert client.get("/api/settings").json()["editable"]["shortcuts"]["agent_prev"] == "Ctrl+Shift+ArrowLeft"
+
+
 def test_put_settings_rejects_field_outside_allowlist(client, settings_file):
     response = client.put("/api/settings", json={"llm": {"api_key": "x"}})
 

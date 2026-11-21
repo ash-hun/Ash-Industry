@@ -7,6 +7,8 @@ import { isAgentBusy } from './events.js';
 import { appendMsg } from './messages.js';
 import { focusCommandFromSpeech } from './focus.js';
 import { hasPhrase, phraseWav } from './phrases.js';
+import { onShortcut } from './shortcuts.js';
+import { setView } from './view.js';
 import { send } from './ws.js';
 
 // TTS 꼬리가 마이크에 들어가지 않게 읽기가 끝난 뒤 잠깐 쉬고 듣는다
@@ -218,10 +220,11 @@ export function stopSpeech() {
   voice.stopSpeaking();
 }
 
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !isSpeechActive()) return;
-  e.preventDefault();
+// 읽기 멈춤 단축키(기본 Esc). 읽는 중이 아니면 키를 쓰지 않아 다른 Esc 처리로 간다
+onShortcut('voice_stop', () => {
+  if (!isSpeechActive()) return false;
   stopSpeech();
+  return true;
 });
 
 // 구체 클릭과 데스크톱 전역 단축키 → 듣기 토글. 읽는 중이면 멈춘다
@@ -235,6 +238,12 @@ export function listenNow() {
 }
 
 $sphereHit.addEventListener('click', listenNow);
+// 듣기 단축키(기본 Ctrl+Shift+Enter)는 데스크톱 전역 단축키와 같다. HUD 로 돌아가 듣기 토글
+onShortcut('voice_start', () => {
+  setView('hud');
+  listenNow();
+  return true;
+});
 
 // 타이핑해서 보내면 말로 주고받던 대화는 끝난다. 답은 화면에만 보인다
 document.getElementById('composer').addEventListener('submit', endConversation);

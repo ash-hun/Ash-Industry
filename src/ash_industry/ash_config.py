@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, PydanticBaseSettingsSource, YamlConfigSettingsSource
 
 
@@ -391,6 +391,45 @@ class FocusConfig(BaseModel):
     ready_timeout_sec: float = 30.0  # 시작할 때 첫 분석과 단계 계획을 기다리는 상한
 
 
+# HUD 안 단축키 형식. 수정키(Ctrl, Alt, Shift, Meta)를 + 로 잇고 끝에 KeyboardEvent.key 이름 하나.
+# 화면(static/app/shortcut-combo.js)의 COMBO 와 같은 식이다. 바꾸면 둘을 같이 바꾼다
+SHORTCUT_PATTERN = (
+    r"^(?:(?:Ctrl|Alt|Shift|Meta)\+){0,4}"
+    r"(?:[A-Za-z0-9]|F[1-9]|F1[0-2]|Enter|Escape|Space|Tab|Backspace|Delete|Home|End|PageUp|PageDown"
+    r"|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$"
+)
+SHORTCUT_MODIFIERS = ("Ctrl", "Alt", "Shift", "Meta")
+
+
+def canonical_shortcut(combo: str) -> str:
+    """수정키 순서와 글자 대소문자를 맞춘 꼴. Shift+Ctrl+a 와 Ctrl+Shift+A 를 같은 키로 본다."""
+    *mods, key = combo.split("+")
+    ordered = [m for m in SHORTCUT_MODIFIERS if m in mods]
+    return "+".join([*ordered, key.upper() if len(key) == 1 else key])
+
+
+class ShortcutsConfig(BaseModel):
+    """Web HUD 창에 포커스가 있을 때만 듣는 단축키. 데스크톱 전역 단축키와는 따로다."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    voice_start: str = Field(default="Ctrl+Shift+Enter", pattern=SHORTCUT_PATTERN)
+    voice_stop: str = Field(default="Escape", pattern=SHORTCUT_PATTERN)
+    agent_prev: str = Field(default="Ctrl+Shift+ArrowLeft", pattern=SHORTCUT_PATTERN)
+    agent_next: str = Field(default="Ctrl+Shift+ArrowRight", pattern=SHORTCUT_PATTERN)
+
+    @model_validator(mode="after")
+    def _distinct(self) -> "ShortcutsConfig":
+        # 같은 키에 동작이 둘이면 화면은 앞의 것만 하므로 저장 단계에서 막는다
+        seen: dict[str, str] = {}
+        for name in type(self).model_fields:
+            combo = canonical_shortcut(getattr(self, name))
+            if combo in seen:
+                raise ValueError(f"단축키가 겹칩니다: {seen[combo]} 와 {name} 이 모두 {combo}")
+            seen[combo] = name
+        return self
+
+
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -486,6 +525,7 @@ class AshSettings(BaseSettings):
     team: TeamConfig = Field(default_factory=TeamConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     focus: FocusConfig = Field(default_factory=FocusConfig)
+    shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
     thought: ThoughtConfig = Field(default_factory=ThoughtConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     openloop: OpenLoopConfig = Field(default_factory=OpenLoopConfig)

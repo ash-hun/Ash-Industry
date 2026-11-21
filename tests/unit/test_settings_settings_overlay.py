@@ -8,11 +8,13 @@ from ash_industry.app.settings_overlay import (
     MASK,
     VoicePatch,
     SettingsPatch,
+    ShortcutsPatch,
     ProactivePatch,
     SettingsOverlay,
     merge_patch,
     mask_secrets,
     editable_values,
+    validate_effective,
 )
 from ash_industry.ui.web.router.settings_router import pending_changes
 from ash_industry.ash_config import AshSettings
@@ -83,7 +85,7 @@ def test_overlay_read_treats_missing_or_non_mapping_file_as_empty(tmp_path):
 def test_editable_values_and_pending_changes_follow_allowlist():
     editable = editable_values(AshSettings())
 
-    assert set(editable) == {"voice", "proactive", "thought", "focus"}
+    assert set(editable) == {"voice", "proactive", "thought", "focus", "shortcuts"}
     assert "api_key" not in editable["thought"]
     current = editable["voice"]["wake_threshold"]
     stored = {"voice": {"wake_threshold": current, "stt_provider": "zzz", "unknown": 1}}
@@ -101,3 +103,30 @@ def test_editable_fields_follow_patch_schema_with_enum_and_range():
     assert (ambient["command_max_sec"]["maximum"], ambient["command_max_chars"]["type"]) == (120, "integer")
     assert fields["focus"] == {"enabled": {"title": "Enabled", "type": "boolean"}}
     assert set(fields) == set(editable_values(AshSettings()))
+
+
+def test_shortcuts_patch_accepts_modifier_combos_and_rejects_bad_names():
+    patch = ShortcutsPatch(voice_start="Ctrl+Alt+Shift+Meta+F12", agent_next="k")
+
+    assert (patch.voice_start, patch.agent_next) == ("Ctrl+Alt+Shift+Meta+F12", "k")
+    for bad in ("Cmd+J", "Ctrl+Shift", "Ctrl+Enter+X", "F13", "Ctrl+", "<b>"):
+        with pytest.raises(ValidationError):
+            ShortcutsPatch(voice_start=bad)
+
+
+def test_validate_effective_rejects_a_patch_that_duplicates_another_shortcut():
+    settings = AshSettings()
+
+    validate_effective(settings, SettingsPatch(shortcuts=ShortcutsPatch(voice_stop="F2")))
+    with pytest.raises(ValidationError, match="겹칩니다"):
+        validate_effective(settings, SettingsPatch(shortcuts=ShortcutsPatch(agent_prev="Escape")))
+    assert settings.shortcuts.agent_prev == "Ctrl+Shift+ArrowLeft"
+
+
+def test_overlay_apply_refuses_duplicates_without_writing(tmp_path):
+    path = tmp_path / "settings.yaml"
+    patch = SettingsPatch(shortcuts=ShortcutsPatch(voice_start="Shift+Ctrl+ArrowLeft"))
+
+    with pytest.raises(ValidationError):
+        SettingsOverlay(path).apply(patch)
+    assert not path.exists()

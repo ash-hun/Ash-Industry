@@ -11,6 +11,7 @@ from ash_industry.app.settings_overlay import (
     mask_secrets,
     editable_fields,
     editable_values,
+    validate_effective,
 )
 from ash_industry.ui.web.settings_applier import SettingsApplier
 from ash_industry.ui.web.process_restart import ProcessRestart
@@ -85,9 +86,11 @@ def build_settings_router(
         "/api/settings",
         summary="설정 편집",
         description=(
-            "허용 목록(voice, proactive, thought, focus 의 일부) 안의 값만 받아 settings.yaml 에 저장하고 바로"
-            " 반영한다. 모르는 필드와 범위 밖 값은 422. applied 는 바로 반영된 키, restart_required 가 true 면"
-            " restart_keys 는 다시 띄워야 반영된다. 같은 본문을 다시 보내면 changed=false 이고 applied 는 비어 있다."
+            "허용 목록(voice, proactive, thought, focus 의 일부와 shortcuts) 안의 값만 받아"
+            " settings.yaml 에 저장하고 바로 반영한다. 모르는 필드, 범위나 형식 밖 값,"
+            " 서로 겹치는 단축키는 422. applied 는 바로 반영된 키,"
+            " restart_required 가 true 면 restart_keys 는 다시 띄워야 반영된다."
+            " 같은 본문을 다시 보내면 changed=false 이고 applied 는 비어 있다."
         ),
         responses={200: {"content": {"application/json": {"example": {
             "changed": True, "applied": ["voice.wake_threshold"], "restart_required": False, "restart_keys": [],
@@ -96,9 +99,12 @@ def build_settings_router(
     )
     async def put_settings(patch: SettingsPatch) -> JSONResponse:
         try:
+            validate_effective(state.settings, patch)
             changed = overlay.apply(patch)
         except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+            # ctx 의 ValueError 는 JSON 이 안 되고 input 에는 섹션 전체(비밀값 포함)가 든다. msg 에 같은 내용이 있다
+            detail = exc.errors(include_url=False, include_context=False, include_input=False)
+            raise HTTPException(status_code=422, detail=detail) from exc
         # 파일이 그대로여도(이미 저장된 값) 프로세스가 아직 옛 값이면 쓴다. 같은 값이면 아무것도 안 한다
         applied = await applier.apply(patch)
         return JSONResponse({

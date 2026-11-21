@@ -4,8 +4,13 @@ import { apiFetch } from './api.js';
 import { onViewOpen } from './view.js';
 import { setLinkState, logActivity, SYSTEM } from './shell.js';
 import { connect } from './session.js';
+import { setShortcuts } from './shortcuts.js';
 
-const SECTION_LABEL = { voice: 'Voice', proactive: 'Proactive', thought: 'Thought', focus: 'Focus' };
+const SECTION_LABEL = { voice: 'Voice', proactive: 'Proactive', thought: 'Thought', focus: 'Focus', shortcuts: '단축키' };
+const SECTION_HINT = {
+  shortcuts: 'HUD 창에 포커스가 있을 때만 듣는다. Ctrl, Alt, Shift, Meta 를 + 로 잇고 끝에 키 이름 '
+    + '(Enter, Escape, Space, ArrowLeft, A, 1, F1). macOS 의 Ctrl 은 Control 키, Cmd 는 Meta',
+};
 // 데스크톱 셸 설정. 값의 정본은 셸(desktop/desktop_settings.js)이고 여기서는 보여 주고 보낸다
 const DESKTOP_FIELDS = {
   hotkey: { title: '전역 단축키 (듣기 시작)', type: 'string' },
@@ -104,6 +109,12 @@ function renderForm(body, saved = false) {
     const legend = document.createElement('legend');
     legend.textContent = SECTION_LABEL[section] || section;
     fs.appendChild(legend);
+    if (SECTION_HINT[section]) {
+      const hint = document.createElement('p');
+      hint.className = 'settings-hint';
+      hint.textContent = SECTION_HINT[section];
+      fs.appendChild(hint);
+    }
     for (const [name, spec] of Object.entries(fields)) {
       const saved = pending[section] && name in pending[section] ? pending[section][name] : _loaded[section]?.[name];
       fs.appendChild(row(`set-${section}-${name}`, spec, saved, !!(pending[section] && name in pending[section])));
@@ -111,6 +122,8 @@ function renderForm(body, saved = false) {
     return fs;
   });
   $fields.replaceChildren(...groups);
+  // 저장한 단축키는 다시 읽지 않아도 이 창에서 바로 쓴다
+  setShortcuts(_loaded.shortcuts);
   $effective.textContent = JSON.stringify(body.effective || {}, null, 2);
   const waiting = Object.keys(pending).length > 0;
   if (saved) status($status, ...savedStatus(body));
@@ -134,6 +147,19 @@ function collectPatch(fields) {
 }
 
 let _fields = {};
+
+// 422 면 서버가 거절한 이유(겹치는 단축키, 형식)를 칸 이름과 함께 보인다
+async function failText(res) {
+  const body = await res.json().catch(() => ({}));
+  const reasons = Array.isArray(body.detail)
+    ? body.detail.map((d) => {
+      const where = (d.loc || []).filter((x) => x !== 'body').join('.');
+      const msg = String(d.msg || '').replace(/^Value error, /, '');
+      return where ? `${where}: ${msg}` : msg;
+    })
+    : [];
+  return reasons.length ? `저장 실패 · ${reasons.join('; ')}` : `저장 실패 (${res.status})`;
+}
 
 export async function loadSettings() {
   try {
@@ -159,7 +185,7 @@ $form.addEventListener('submit', async (e) => {
     const res = await apiFetch('/api/settings', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
     });
-    if (!res.ok) { status($status, `저장 실패 (${res.status})`, 'err'); return; }
+    if (!res.ok) { status($status, await failText(res), 'err'); return; }
     const body = await res.json();
     renderForm(body, true);
     // 음성 설정은 접속 인사(connected)가 모드와 언어를 정한다. 다시 붙어야 이 화면도 새 값을 쓴다

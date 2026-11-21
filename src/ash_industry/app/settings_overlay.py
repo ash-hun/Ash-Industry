@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
+from ash_industry.ash_config import SHORTCUT_PATTERN, AshSettings
 from ash_industry.common.logger import get_logger
-from ash_industry.ash_config import AshSettings
 
 logger = get_logger(__name__)
 # 이름에 이 낱말이 들어간 값은 화면에 내보내지 않는다. 키 자체가 비밀인 security.api_keys 도 여기 걸린다
@@ -57,6 +57,17 @@ class FocusPatch(BaseModel):
     enabled: bool | None = None
 
 
+class ShortcutsPatch(BaseModel):
+    """HUD 안 단축키. 넷이 서로 겹치지 않는지는 합친 결과(ShortcutsConfig)가 본다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    voice_start: str | None = Field(default=None, title="듣기 시작/토글", pattern=SHORTCUT_PATTERN)
+    voice_stop: str | None = Field(default=None, title="읽기 멈춤", pattern=SHORTCUT_PATTERN)
+    agent_prev: str | None = Field(default=None, title="이전 에이전트", pattern=SHORTCUT_PATTERN)
+    agent_next: str | None = Field(default=None, title="다음 에이전트", pattern=SHORTCUT_PATTERN)
+
+
 class SettingsPatch(BaseModel):
     """PUT /api/settings 본문. 비운 섹션과 필드는 건드리지 않는다."""
 
@@ -66,6 +77,7 @@ class SettingsPatch(BaseModel):
     proactive: ProactivePatch | None = None
     thought: ThoughtPatch | None = None
     focus: FocusPatch | None = None
+    shortcuts: ShortcutsPatch | None = None
 
 
 def mask_secrets(value: Any, name: str = "") -> Any:
@@ -103,6 +115,13 @@ def editable_fields() -> dict[str, dict[str, dict[str, Any]]]:
             section_fields[name] = {"title": field.get("title", name), **keep}
         fields[section] = section_fields
     return fields
+
+
+def validate_effective(settings: AshSettings, patch: SettingsPatch) -> None:
+    """patch 를 지금 적용값(env 포함)에 얹어도 섹션 모델 검증(겹치는 단축키 등)을 통과하는지."""
+    for section, values in patch.model_dump(exclude_none=True).items():
+        current = getattr(settings, section)
+        type(current).model_validate({**current.model_dump(), **values})
 
 
 def merge_patch(stored: dict[str, Any], patch: SettingsPatch) -> dict[str, Any]:

@@ -2,11 +2,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULTS = Object.freeze({
-  hotkey: 'CommandOrControl+Shift+J',
-  autoLaunch: false,
-  backendUrl: 'http://127.0.0.1:7777',
-});
+// macOS 는 Cmd+Shift+Enter 를 다른 앱이 흔히 써서 Control 을 더 누른다. 그 밖 OS 는 Ctrl+Alt+Shift+Enter
+function defaultHotkey(platform) {
+  return platform === 'darwin' ? 'Command+Control+Shift+Enter' : 'Control+Alt+Shift+Enter';
+}
+
+function defaultsFor(platform) {
+  return Object.freeze({ hotkey: defaultHotkey(platform), autoLaunch: false, backendUrl: 'http://127.0.0.1:7777' });
+}
+
+const DEFAULTS = defaultsFor(process.platform);
 // 셸이 띄우는 페이지는 이 기계 안의 백엔드만. preload 브리지가 다른 출처에 열리지 않게 한다
 const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const HOTKEY = /^[A-Za-z0-9+]{1,64}$/;
@@ -20,13 +25,13 @@ function normalizeBackendUrl(value) {
 }
 
 // 알 수 없는 키는 버리고, 형식이 틀린 값은 오류로 돌려준다. 같은 입력이면 같은 결과다
-function normalize(input) {
+function normalize(input, platform = process.platform) {
   const errors = [];
-  const out = { ...DEFAULTS };
+  const out = { ...defaultsFor(platform) };
   const src = input && typeof input === 'object' ? input : {};
   if ('hotkey' in src) {
     if (typeof src.hotkey === 'string' && HOTKEY.test(src.hotkey)) out.hotkey = src.hotkey;
-    else errors.push('hotkey: 영문, 숫자, + 만 (예: CommandOrControl+Shift+J)');
+    else errors.push('hotkey: 영문, 숫자, + 만 (예: Command+Control+Shift+Enter, Control+Alt+Shift+Enter)');
   }
   if ('autoLaunch' in src) {
     if (typeof src.autoLaunch === 'boolean') out.autoLaunch = src.autoLaunch;
@@ -73,4 +78,4 @@ class DesktopSettings {
   }
 }
 
-module.exports = { DEFAULTS, DesktopSettings, normalize, normalizeBackendUrl };
+module.exports = { DEFAULTS, DesktopSettings, defaultHotkey, defaultsFor, normalize, normalizeBackendUrl };

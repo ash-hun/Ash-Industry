@@ -5,6 +5,7 @@ import { setInputEnabled } from './composer.js';
 import { connect } from './session.js';
 import { handleMessage } from './events.js';
 import { restoreView } from './view.js';
+import { loadShortcuts } from './shortcuts.js';
 import './workflow.js';
 import './settings.js';
 import './desktop.js';
@@ -21,4 +22,5 @@ showQuote();
 setInputEnabled(false);
 connect('default');
 restoreView();
+loadShortcuts();
 

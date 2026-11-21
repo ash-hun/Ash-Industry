@@ -169,7 +169,8 @@
 | 웨이크워드 | 듣기, 읽기, 응답, 승인 중이 아닐 때와 주변 대화 뒤 쉬는 동안이 아닐 때만 마이크 소리를 16kHz PCM 으로 서버에 보낸다. 서버가 녹음을 주변 대화(`ambient`)로 보면 ACTIVITY `◎ voice · 주변 대화로 보고 무시 · <앞 40자>` 와 `◉ wake · 주변 대화가 이어져 N분 쉼`(2분, 거듭되면 두 배, 최대 15분) 을 남기고 그동안 깨지 않는다. 진짜 요청이 들어오면 바로 푼다. 서버가 `voice_wake` 를 보내면 ACTIVITY `◉ wake`, 녹음 문구 `wake_up` 이 있으면 그것을 읽고 바로 듣는다(LISTENING). 깨워 보낸 요청은 음성 대화를 열어 응답을 읽고 다시 듣는다. 설정한 웨이크워드 모델(`voice.wake_model_file`)의 낱말만 알아듣는다. 서버가 `voice.wake=false` 면 보내지 않는다 |
 | 읽기 문구 | 음성으로 일하는 중(음성 대화 중, 또는 음성으로 시작한 요청)에 아래 순간마다 합성 대신 녹음한 문구를 읽는다. `web_search` 도구 시작 `Searching Reference.`, `remember_task_pattern` 도구 시작 `Checking the Pattern.`, 💬 filler `Processing Long Task.`(filler 문장은 화면에만 쓰고 읽지 않는다), `/focus` 로 켜고 끔 `Activate Focus mode.` / `Deactivate Focus mode.`(접속 때 되살아나는 Focus 는 읽지 않는다), Focus 분석 갱신 시작 `Target. Analysis.`, 에이전트 칩으로 전환 문구 `persona_<에이전트 id>`(main 은 `persona_main`). 서버가 알려 준 문구가 없으면 예전대로 한다 |
 | Ctrl+K | `abort` 전송, 스트림 종료, 입력 복원. 대기 말이 있으면 서버가 바로 다음 턴으로 보낸다 |
-| Esc | 드로어 닫기. 읽는 중(합성 대기 포함)이면 읽기도 멈춘다. 멈추면 음성 대화가 끝나 다시 듣지 않고, 늦게 온 합성 결과는 버린다 |
+| Esc | 드로어 닫기. 읽는 중(합성 대기 포함)이면 읽기도 멈춘다(읽기 멈춤 단축키 `shortcuts.voice_stop` 의 기본값이라 바꾸면 그 키가 멈춘다. 드로어 닫기 같은 다른 Esc 동작은 그대로). 멈추면 음성 대화가 끝나 다시 듣지 않고, 늦게 온 합성 결과는 버린다 |
+| HUD 단축키(이 창에 포커스가 있을 때만, SET 의 단축키 묶음에서 바꾼다) | `Ctrl+Shift+Enter`: HUD 로 돌아가 듣기 토글(구체 클릭, 데스크톱 전역 단축키와 같다. 입력창에서 눌러도 듣기이고 보내지 않는다). `Escape`: 읽는 중이면 읽기 멈춤. `Ctrl+Shift+ArrowLeft`/`ArrowRight`: 이전, 다음 에이전트(‹ › 화살표 클릭과 같다. HUD 화면이고 에이전트가 둘 이상일 때만, 글이 든 입력칸에서는 단어 선택에 양보). 수정키 집합이 정확히 같아야 하고(`Ctrl+Shift+Enter` 에 Cmd 를 더 누르면 아니다), macOS 의 `Ctrl` 은 Control 키다. 길게 눌러 반복되는 키, 한글 조합 중인 키, 확인 창이 열린 동안은 받지 않는다. 승인 모달이나 음성 승인 띠가 열린 동안은 읽기 멈춤만 받는다. 시작할 때 `GET /api/settings` 의 `editable.shortcuts` 를 읽고 못 읽으면(접근 키 없음, 연결 없음) 기본값 |
 | `/focus <작업>` 전송, 음성 "포커스 모드 <작업>" | Focus 시작. 안내 한 줄 뒤 레이아웃이 바뀌고, 첫 분석과 단계 계획이 나오면(최대 30초) 작업 문장으로 첫 응답을 시작한다. 이미 작업이 있으면 거절 안내만 |
 | `/focus stop`, 음성 "포커스 모드 종료" / "포커스 종료" | Focus 종료, Default 레이아웃으로 돌아간다. 인식이 "버스 모드" 처럼 틀려도 "모드" 가 붙으면 받는다. Focus 중에는 앞이 잘려 "종료", "끝", "그만해", "모드 종료" 만 들려도 끝낸다(실측 오인식 "동요" 포함). 문장 속 "종료" 는 받지 않는다. 응답 중에는 입력창이 잠겨 있어 끝난 뒤에 보낼 수 있다 |
 | `/focus` | 진행률과 단계를 대화에 한 번 보여준다 |
@@ -246,7 +247,7 @@ WS 끊김: 헤더 이름 옆 점이 빨갛게 멈추고, 헤더 바로 밑에 �
 
 ### `/` SET — Settings
 
-**목적**: 지금 적용된 설정을 보고, 화면에서 고쳐도 안전한 값(voice, proactive, thought, focus 의 일부)을 저장한다. 데스크톱 앱이면 단축키와 자동 실행 같은 앱 설정도 여기서 고친다.
+**목적**: 지금 적용된 설정을 보고, 화면에서 고쳐도 안전한 값(voice, proactive, thought, focus 의 일부와 HUD 단축키)을 저장한다. 데스크톱 앱이면 단축키와 자동 실행 같은 앱 설정도 여기서 고친다.
 
 **레이아웃**: 왼쪽 열에 SYSTEM 과 DESKTOP(데스크톱 앱에서만), 오른쪽 열(2배 폭)에 SETTINGS, 그 아래 줄 전체에 MCP(MCP 서버가 있을 때만), 맨 아래 줄 전체에 EFFECTIVE CONFIG. 860px 이하에서는 한 열로 SYSTEM, SETTINGS, DESKTOP, MCP, EFFECTIVE CONFIG 순. SYSTEM 은 HUD 왼쪽 열에 있던 카드를 그대로 옮긴 것이다(가동 시간, 모델, 세션, 토큰, 비용, 사용량 그래프, TOOLS 목록).
 
@@ -259,7 +260,7 @@ WS 끊김: 헤더 이름 옆 점이 빨갛게 멈추고, 헤더 바로 밑에 �
 │  TOKENS…COST       │  Stt Provider    [browser ▾]            │
 │  TOOLS ▾           │  Wake Threshold  [0.5     ]             │
 ├────────────────────┤ PROACTIVE …                             │
-│ DESKTOP    앱 전용 │                                         │
+│ DESKTOP    앱 전용 │ 단축키  듣기 시작/토글 [Ctrl+Shift+Enter] │
 │ 전역 단축키 [ … ]   │ 저장됨 · 재시작하면 반영 [RESTART] [SAVE] │
 │ 백엔드 주소 [ … ]   │                                         │
 ├────────────────────┴─────────────────────────────────────────┤
@@ -268,15 +269,15 @@ WS 끊김: 헤더 이름 옆 점이 빨갛게 멈추고, 헤더 바로 밑에 �
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**데이터**: 폼은 `GET /api/settings` 의 `fields`(형식, 선택지, 범위)로 그리고 값은 `pending` 이 있으면 그 값, 없으면 `editable`. 선택지가 있으면 select, boolean 은 체크박스, 숫자는 범위가 걸린 number, 문자열은 pattern 이 걸린 text. DESKTOP 은 `window.ashDesktop.getSettings()`.
+**데이터**: 폼은 `GET /api/settings` 의 `fields`(형식, 선택지, 범위)로 그리고 값은 `pending` 이 있으면 그 값, 없으면 `editable`. 선택지가 있으면 select, boolean 은 체크박스, 숫자는 범위가 걸린 number, 문자열은 pattern 이 걸린 text. 단축키 묶음(`shortcuts`)은 legend `단축키` 아래 형식 안내 한 줄(`Ctrl`, `Alt`, `Shift`, `Meta` 를 `+` 로 잇고 끝에 키 이름, macOS 의 Ctrl 은 Control 키, Cmd 는 Meta)과 네 칸(듣기 시작/토글, 읽기 멈춤, 이전 에이전트, 다음 에이전트). 키를 눌러 기록하는 입력은 없고 글로 쓴다. DESKTOP 은 `window.ashDesktop.getSettings()`.
 
 **상태와 파라미터**: 저장 직후 상태 줄은 응답대로 셋 중 하나다. 바로 쓴 키가 있으면 `반영됨 · voice.wake_threshold, …`(강조색), 바로 쓸 수 없는 키가 있으면(`restart_required`) `저장됨 · thought.enabled 은 백엔드를 다시 띄우면 반영됩니다`(경고색), 바뀐 게 없으면 `바뀐 값이 없습니다`. `pending` 에 든 행(재시작해야 반영되는 키)은 이름 뒤에 `· 재시작 대기`. 화면을 다시 열어 대기 항목이 있으면 상태 줄 `저장됨 · 백엔드를 다시 띄우면 반영됩니다`. 대기 항목이 있을 때만 RESTART BACKEND 버튼이 보인다(브라우저와 데스크톱 앱 모두).
 
-**인터랙션**: SAVE 는 적용값과 다른 값만 `PUT /api/settings` 로 보내고 서버가 바로 반영한다. 바뀐 것이 없으면 `바뀐 값이 없습니다`. 응답의 `applied` 에 `voice.` 키가 있으면 ws 를 다시 붙인다(접속 인사가 음성 모드와 언어를 정하므로, 대화 화면이 새로 그려진다). RESTART BACKEND 는 누르는 즉시 헤더 연결 점을 `연결 끊김 — 재시작 중` 으로 바꾸고 `POST /ion/restart` 로 Ion 이 컨테이너를 재기동하게 한다. Ion 이 없거나 거절하면 활동 로그에 `ion restart 실패 (<이유>) · 백엔드 자기 재시작으로` 를 남기고 `POST /api/restart` 를 부른다(백엔드가 스스로 종료해 Docker restart 정책으로 다시 뜬다). 받아들여지면 상태 줄 `재시작 중 · 연결이 돌아오면 다시 붙습니다`, 서버가 보낸 `restarting` 이벤트로 열린 HUD 전부가 같은 연결 표시를 보이고, 소켓이 닫히면 기존 재접속 루프가 돌아온 뒤 다시 붙는다. 데스크톱 앱은 페이지를 다시 읽는다. DESKTOP 의 SAVE 는 셸이 검증해 저장하고 단축키와 자동 실행을 바로 적용한다.
+**인터랙션**: SAVE 는 적용값과 다른 값만 `PUT /api/settings` 로 보내고 서버가 바로 반영한다. 바뀐 것이 없으면 `바뀐 값이 없습니다`. 응답의 `applied` 에 `voice.` 키가 있으면 ws 를 다시 붙인다(접속 인사가 음성 모드와 언어를 정하므로, 대화 화면이 새로 그려진다). 응답(과 SET 을 열 때 읽은 값)의 `editable.shortcuts` 는 이 창의 단축키에 바로 쓴다. 다른 창은 새로 고치거나 SET 을 열 때 바뀐다. RESTART BACKEND 는 누르는 즉시 헤더 연결 점을 `연결 끊김 — 재시작 중` 으로 바꾸고 `POST /ion/restart` 로 Ion 이 컨테이너를 재기동하게 한다. Ion 이 없거나 거절하면 활동 로그에 `ion restart 실패 (<이유>) · 백엔드 자기 재시작으로` 를 남기고 `POST /api/restart` 를 부른다(백엔드가 스스로 종료해 Docker restart 정책으로 다시 뜬다). 받아들여지면 상태 줄 `재시작 중 · 연결이 돌아오면 다시 붙습니다`, 서버가 보낸 `restarting` 이벤트로 열린 HUD 전부가 같은 연결 표시를 보이고, 소켓이 닫히면 기존 재접속 루프가 돌아온 뒤 다시 붙는다. 데스크톱 앱은 페이지를 다시 읽는다. DESKTOP 의 SAVE 는 셸이 검증해 저장하고 단축키와 자동 실행을 바로 적용한다.
 
 **빈 상태**: 브라우저에서는 DESKTOP 카드가 없다.
 
-**에러 상태**: 형식이나 범위가 틀린 칸이 있으면 저장하지 않고 `범위나 형식이 맞지 않는 값이 있습니다` 와 함께 그 칸으로 간다. 서버 422 나 실패 코드는 `저장 실패 (코드)`, 연결이 없으면 `백엔드에 연결되지 않았습니다`. 데스크톱 설정이 틀리면(루프백이 아닌 주소, 등록할 수 없는 단축키) 셸이 거절한 이유를 보인다. Ion 과 백엔드 자기 재시작이 둘 다 안 되면(컨테이너 밖이면 `no supervisor`) 연결 점을 되돌리고 `재시작 실패: <이유>. docker compose restart ash-backend 를 직접 실행하세요`.
+**에러 상태**: 형식이나 범위가 틀린 칸이 있으면 저장하지 않고 `범위나 형식이 맞지 않는 값이 있습니다` 와 함께 그 칸으로 간다. 서버 422 면 서버가 준 이유를 칸 이름과 함께 `저장 실패 · shortcuts: 단축키가 겹칩니다: voice_stop 와 agent_prev 이 모두 Escape` 처럼, 이유가 없는 실패는 `저장 실패 (코드)`, 연결이 없으면 `백엔드에 연결되지 않았습니다`. 데스크톱 설정이 틀리면(루프백이 아닌 주소, 등록할 수 없는 단축키) 셸이 거절한 이유를 보인다. Ion 과 백엔드 자기 재시작이 둘 다 안 되면(컨테이너 밖이면 `no supervisor`) 연결 점을 되돌리고 `재시작 실패: <이유>. docker compose restart ash-backend 를 직접 실행하세요`.
 
 
 **MCP 카드**(`mcp_servers` 가 있을 때만, `GET /api/mcp/policy`, `GET /api/mcp/audit`):
@@ -319,7 +320,8 @@ WS 끊김: 헤더 이름 옆 점이 빨갛게 멈추고, 헤더 바로 밑에 �
 | 다른 세션의 승인 대기 띠 | `approval-wait.js` | `approval_waiting`, `session:connected` | 헤더 아래 오른쪽 |
 | 결과물 플레이어 모달 | `media.js` | `tool_execution_end.artifacts`, `GET /api/creative/files/{path}` | 전역 모달 |
 | 화면 탭(HUD, FLOW, SET)과 전환 애니메이션 | `view.js` | 클릭, `Esc`, `hud.view`, 움직임 줄이기 설정 | 헤더, 모든 화면의 카드 |
-| 에이전트 전환 화살표, 구체 밀기 | `agent-nav.js` | `/api/agents`, 포인터, `ash:palette` | HUD 리액터 |
+| 에이전트 전환 화살표, 구체 밀기 | `agent-nav.js` | `/api/agents`, 포인터, 단축키 `agent_prev`/`agent_next`, `ash:palette` | HUD 리액터 |
+| HUD 단축키 | `shortcut-combo.js`(조합 읽기, 맞추기, 기본값), `shortcuts.js`(설정 읽기, keydown 하나로 동작 보내기) | `editable.shortcuts`, keydown(capture) | 듣기 토글, 읽기 멈춤(`voice-ui.js`), 에이전트 전환(`agent-nav.js`) |
 | 헤더 가운데 정렬 | `header.js` | `.sphere-wrap` 위치(창 크기, Focus 열 전환) | 헤더 가운데 묶음을 구체 중심에 |
 | 시각, 연결 점 | `shell.js` | 1초 시계, `setLinkState` | 헤더 가운데 |
 | 데스크톱 연결부 | `desktop.js`, `desktop/preload.js` | `window.ashDesktop`(있을 때만), 전역 단축키 신호 | 단축키는 HUD 로 돌아가 듣기 토글. 제목 표시줄이 없는 창이라 헤더를 잡고 창을 끌고, 버튼만 끌기에서 빠진다. 헤더는 macOS 신호등 버튼 자리(왼쪽 92px), 그 밖 OS 의 창 버튼 자리(오른쪽 150px)를 비운다 |

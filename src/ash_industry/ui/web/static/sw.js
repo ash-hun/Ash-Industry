@@ -41,6 +41,8 @@ const SHELL = [
   'app/reply.js',
   'app/session.js',
   'app/settings.js',
+  'app/shortcut-combo.js',
+  'app/shortcuts.js',
   'app/shell.js',
   'app/tools.js',
   'app/usage.js',

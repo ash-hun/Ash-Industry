@@ -1398,7 +1398,7 @@ GET /api/settings
 | 필드 | 타입 | 널 허용 | 설명 |
 |---|---|---|---|
 | `path` | string | 아니오 | 저장 파일 경로(`ASH_SETTINGS_FILE`, 기본 `~/.ash/settings.yaml`) |
-| `fields` | object | 아니오 | 섹션(`voice`, `proactive`, `thought`, `focus`) → 필드 → `{title, type, enum?, minimum?, maximum?, pattern?}`. 편집 허용 목록(`SettingsPatch`)에서 유도한다 |
+| `fields` | object | 아니오 | 섹션(`voice`, `proactive`, `thought`, `focus`, `shortcuts`) → 필드 → `{title, type, enum?, minimum?, maximum?, pattern?}`. 편집 허용 목록(`SettingsPatch`)에서 유도한다 |
 | `editable` | object | 아니오 | `fields` 와 같은 모양으로 지금 프로세스의 적용값 |
 | `pending` | object | 아니오 | settings.yaml 에 있지만 적용값과 다른 값. 비어 있지 않으면 백엔드를 다시 띄워야 반영된다 |
 | `effective` | object | 아니오 | 전체 설정. 이름이 `key`, `token`, `secret`, `password`, `dsn` 으로 끝나거나(`_` 구분) `webhook` 이 든 값은 `***`(빈 값은 그대로) |
@@ -1450,6 +1450,7 @@ PUT /api/settings
 | `proactive` | object | 아니오 | `enabled`, `daemon_enabled`(boolean), `daemon_trigger`(`interval`/`idle`/`both`), `daemon_interval_sec`, `daemon_idle_sec`(30~3600), `confidence_threshold`(0~1), `cooldown_sec`(0~86400) |
 | `thought` | object | 아니오 | `enabled`(boolean), `router_threshold`(0~1) |
 | `focus` | object | 아니오 | `enabled`(boolean) |
+| `shortcuts` | object | 아니오 | HUD 안 단축키 `voice_start`(기본 `Ctrl+Shift+Enter`), `voice_stop`(기본 `Escape`), `agent_prev`(기본 `Ctrl+Shift+ArrowLeft`), `agent_next`(기본 `Ctrl+Shift+ArrowRight`). 각각 `Ctrl`, `Alt`, `Shift`, `Meta` 를 `+` 로 잇고 끝에 키 이름 하나(`A`~`Z`, `0`~`9`, `F1`~`F12`, `Enter`, `Escape`, `Space`, `Tab`, `Backspace`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, 방향키 `ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`). 지금 적용값에 얹은 넷이 서로 같으면(수정키 순서와 글자 대소문자는 무시) 422 |
 
 모르는 섹션이나 필드는 422 다. 비운 섹션과 필드는 건드리지 않는다.
 
@@ -1475,7 +1476,8 @@ PUT /api/settings
 |---|---|---|
 | `200` | 정상 | 위 스키마 |
 | `401` | 인증이 켜져 있는데 키가 없음 | `{"error": "unauthorized"}` |
-| `422` | 허용 목록 밖 필드, 범위 밖 값, 본문 JSON 오류 | FastAPI 기본 모양 |
+| `422` | 허용 목록 밖 필드, 범위나 형식 밖 값, 본문 JSON 오류 | FastAPI 기본 모양 |
+| `422` | 단축키 넷 중 둘이 같음 | `{"detail": [{"type": "value_error", "loc": [], "msg": "Value error, 단축키가 겹칩니다: voice_stop 와 agent_prev 이 모두 Escape"}]}`. 파일은 건드리지 않는다 |
 
 #### 호출 예시
 
@@ -1484,6 +1486,10 @@ $ curl -s -X PUT http://localhost:7777/api/settings -H 'Content-Type: applicatio
 {"changed":true,"applied":["voice.wake_threshold"],"restart_required":false,"restart_keys":[],"path":"/root/.ash/settings.yaml",...,"pending":{},...}
 $ curl -s -X PUT http://localhost:7777/api/settings -H 'Content-Type: application/json' -d '{"thought":{"enabled":false}}'
 {"changed":true,"applied":[],"restart_required":true,"restart_keys":["thought.enabled"],...,"pending":{"thought":{"enabled":false}},...}
+$ curl -s -X PUT http://localhost:7777/api/settings -H 'Content-Type: application/json' -d '{"shortcuts":{"voice_start":"Alt+Space"}}'
+{"changed":true,"applied":["shortcuts.voice_start"],"restart_required":false,...,"editable":{...,"shortcuts":{"voice_start":"Alt+Space","voice_stop":"Escape",...}},...}
+$ curl -s -X PUT http://localhost:7777/api/settings -H 'Content-Type: application/json' -d '{"shortcuts":{"agent_prev":"Escape"}}'
+{"detail":[{"type":"value_error","loc":[],"msg":"Value error, 단축키가 겹칩니다: voice_stop 와 agent_prev 이 모두 Escape"}]}
 ```
 
 #### 특이사항

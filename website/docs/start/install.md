@@ -121,7 +121,7 @@ ASH_LLM__MODEL=gemma4:e4b
 
 ## 데스크톱 앱으로 쓰기
 
-`desktop/` 의 Electron 앱은 HUD 를 창 하나로 연다. 백엔드가 떠 있지 않으면 `docker compose --profile web up -d` 를 대신 실행하고, 창을 닫아도 트레이에 남아 먼저 건네는 말과 알림을 OS 알림으로 띄운다. 단축키 `CommandOrControl+Shift+J` 를 누르면 창이 앞으로 오고 바로 듣기 시작한다.
+`desktop/` 의 Electron 앱은 HUD 를 창 하나로 연다. 백엔드가 떠 있지 않으면 `docker compose --profile web up -d` 를 대신 실행하고, 창을 닫아도 트레이에 남아 먼저 건네는 말과 알림을 OS 알림으로 띄운다. 전역 단축키(macOS 는 `Command+Control+Shift+Enter`, Windows 와 Linux 는 `Control+Alt+Shift+Enter`)를 누르면 창이 앞으로 오고 바로 듣기 시작한다. SET 화면의 Desktop 카드에서 바꿀 수 있다.
 
 ```bash
 cd desktop && npm install && npm start

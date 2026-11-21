@@ -293,7 +293,7 @@
 | GitHub Release 의 `AshIndustry-<버전>-<arch>.dmg` | Applications 에 끌어 넣고 처음 한 번 Gatekeeper 를 푼다(README). Apple Silicon 은 arm64, Intel 은 x64 |
 | `cd desktop && npm install && npm start` | 저장소에서 바로 띄우기. 두 번째 실행은 첫 창을 앞으로 가져온다 |
 | `cd desktop && npm run dist` | 이 기계에서 dmg, zip 빌드(`desktop/dist/`, 서명 없음) |
-| 전역 단축키(기본 `CommandOrControl+Shift+J`) | 창을 앞으로, HUD 로 돌아가 듣기 토글 |
+| 전역 단축키(기본 macOS `Command+Control+Shift+Enter`, 그 밖 OS `Control+Alt+Shift+Enter`) | 창을 앞으로, HUD 로 돌아가 듣기 토글. 기본값은 `desktop_settings.defaultHotkey(platform)` 이 정한다 |
 | 트레이 메뉴 | 열기, 듣기 시작, 종료 |
 | HUD `SET` 화면의 Desktop 카드 | 단축키, 로그인 때 자동 실행, 백엔드 주소(루프백만) 저장 |
 | HUD `SET` 화면의 RESTART BACKEND | 저장했지만 반영되지 않은 설정이 있을 때 Ion(`POST /ion/restart`)으로 백엔드 재시작. 브라우저에서도 된다 |
@@ -1555,19 +1555,20 @@
 
 ### settings: 설정 화면
 
-**설명**: 화면에서 고칠 수 있는 설정(voice, proactive, thought, focus 의 일부)을 `~/.ash/settings.yaml` 에 저장하고 같은 요청 안에서 지금 프로세스에 쓴다. 이 파일은 설정 원천 중 가장 앞(yaml, 환경변수, `.env` 순)이라 compose 가 넣은 환경변수도 이기고, 다음 기동도 같은 값으로 뜬다. 바로 쓸 수 없는 키(`thought.enabled`)만 재시작 대기로 남고, 재시작은 SET 화면의 버튼이 Ion 또는 백엔드 자기 재시작으로 한다. 전체 적용값은 이름이 비밀값처럼 보이는 항목(`*_key`, `*_token`, `*_dsn`, `*webhook*` 등)을 `***` 로 가려 보인다.
+**설명**: 화면에서 고칠 수 있는 설정(voice, proactive, thought, focus 의 일부와 HUD 단축키 `shortcuts`)을 `~/.ash/settings.yaml` 에 저장하고 같은 요청 안에서 지금 프로세스에 쓴다. 이 파일은 설정 원천 중 가장 앞(yaml, 환경변수, `.env` 순)이라 compose 가 넣은 환경변수도 이기고, 다음 기동도 같은 값으로 뜬다. 바로 쓸 수 없는 키(`thought.enabled`)만 재시작 대기로 남고, 재시작은 SET 화면의 버튼이 Ion 또는 백엔드 자기 재시작으로 한다. 전체 적용값은 이름이 비밀값처럼 보이는 항목(`*_key`, `*_token`, `*_dsn`, `*webhook*` 등)을 `***` 로 가려 보인다.
 
 **입력과 결과**
 
 | 입력 | 결과 |
 |---|---|
 | `GET /api/settings` | `fields`(고칠 수 있는 항목의 형식과 범위), `editable`(그 항목의 적용값), `pending`(저장했지만 아직 반영되지 않은 값), `effective`(가린 전체 적용값), `path` |
-| `PUT /api/settings {voice?, proactive?, thought?, focus?}` | 허용 목록 밖 필드와 범위 밖 값은 422. 바뀐 게 있으면 yaml 을 원자적으로 쓰고 `changed: true`. 프로세스에 쓴 키는 `applied`, 못 쓴 키는 `restart_required: true` 와 `restart_keys` |
+| `PUT /api/settings {voice?, proactive?, thought?, focus?, shortcuts?}` | 허용 목록 밖 필드, 범위나 형식 밖 값, 다른 단축키와 겹치는 단축키는 422(`detail[].msg` 에 이유). 바뀐 게 있으면 yaml 을 원자적으로 쓰고 `changed: true`. 프로세스에 쓴 키는 `applied`, 못 쓴 키는 `restart_required: true` 와 `restart_keys` |
 | `POST /api/restart` | 열린 HUD 전부에 `restarting` 을 보내고 프로세스가 정상 종료(exit 0)해 Docker 의 `restart: unless-stopped` 가 다시 띄운다. 컨테이너 밖이면 409 |
 | `GET /api/health` | `{ok: true}`. 데스크톱 셸과 Ion 이 백엔드 확인에 쓴다 |
-| HUD `SET` 화면 | 폼을 `fields` 로 그리고 바뀐 값만 보낸다. 반영된 키와 재시작 대기 키를 상태 줄에, 대기 항목은 행에 표시. RESTART BACKEND 는 `/ion/restart` 가 안 되면 `/api/restart` |
+| HUD `SET` 화면 | 폼을 `fields` 로 그리고 바뀐 값만 보낸다. 반영된 키와 재시작 대기 키를 상태 줄에, 대기 항목은 행에 표시. 422 면 서버가 준 이유를 칸 이름과 함께 보인다. RESTART BACKEND 는 `/ion/restart` 가 안 되면 `/api/restart` |
+| HUD 단축키(`shortcuts.voice_start`, `voice_stop`, `agent_prev`, `agent_next`) | HUD 창에 포커스가 있을 때만 듣는다. 기본 `Ctrl+Shift+Enter`(듣기 토글, 데스크톱 전역 단축키와 같은 동작), `Escape`(읽기 멈춤), `Ctrl+Shift+ArrowLeft`/`ArrowRight`(에이전트 전환, 화살표 클릭과 같다). 형식은 `Ctrl`, `Alt`, `Shift`, `Meta` 를 `+` 로 잇고 끝에 `KeyboardEvent.key` 이름(글자, 숫자, F1~F12, Enter, Escape, Space, 방향키 등). macOS 의 `Ctrl` 은 Control 키다 |
 
-**처리 흐름**: `settings_router` 에서 `SettingsPatch` 검증으로, `SettingsOverlay.apply` 가 저장된 yaml 위에 patch 를 얹고(`merge_patch`), 합친 결과가 `AshSettings` 로 읽히는지 본 뒤 임시 파일을 바꿔 끼우고, `SettingsApplier.apply` 가 지금 적용값과 다른 키만(`changed_values`) 아래 표대로 쓰는 순. 기동 때는 `AshSettings.settings_customise_sources` 가 yaml 을 읽는다. 재시작은 `ProcessRestart` 가 응답이 나간 뒤 자기에게 SIGTERM 을 보내 uvicorn 의 종료 훅(세션 저장)을 돌리고, 10초를 넘기면 바로 끝낸다(`docker restart` 의 t 와 같다).
+**처리 흐름**: `settings_router` 에서 `SettingsPatch` 검증, `validate_effective` 가 patch 를 지금 적용값(env 포함)에 얹어 섹션 모델 규칙(단축키 넷이 서로 다른지)을 보고, `SettingsOverlay.apply` 가 저장된 yaml 위에 patch 를 얹고(`merge_patch`), 합친 결과가 `AshSettings` 로 읽히는지 본 뒤 임시 파일을 바꿔 끼우고, `SettingsApplier.apply` 가 지금 적용값과 다른 키만(`changed_values`) 아래 표대로 쓰는 순. 기동 때는 `AshSettings.settings_customise_sources` 가 yaml 을 읽는다. 재시작은 `ProcessRestart` 가 응답이 나간 뒤 자기에게 SIGTERM 을 보내 uvicorn 의 종료 훅(세션 저장)을 돌리고, 10초를 넘기면 바로 끝낸다(`docker restart` 의 t 와 같다).
 
 **키별 반영 방식**: 설정 객체(`AshSettings` 의 하위 모델)는 프로세스에 하나라 값을 쓰면 읽는 쪽이 바로 본다. 만들 때 값을 복사한 객체는 다시 만들거나 제공자(provider)로 매번 읽게 했다.
 
@@ -1584,6 +1585,7 @@
 | `thought.router_threshold` | `ThoughtRouter`(세션마다, 복사) | `threshold_provider` 로 매번 설정에서 읽음 |
 | `thought.enabled` | open loop 저장소, 사고 엔진, 답 분류기, `/journal` 명령 등 기동 때 구조 | 재시작 대기(`restart_required`) |
 | `focus.enabled` | `WebState.focus` | `WebState.rebuild_focus` 로 만들거나 내려놓음 |
+| `shortcuts.*` | 백엔드는 쓰지 않는다. HUD 의 `shortcuts.js` 가 시작할 때 `GET /api/settings` 의 `editable.shortcuts` 를, SET 에서 저장하면 응답의 같은 값을 읽는다 | 공유 객체에 쓰기만. 다른 창은 새로 고치거나 SET 을 열면 반영. 읽지 못하면(접근 키 없음, 백엔드 없음) 화면 기본값 |
 
 정의 파일이 `proactive` 를 고정한 팀 에이전트는 설정 사본을 들므로 그 사본에도 같은 값을 쓴다(`enabled` 는 정의대로 둔다).
 
@@ -1592,7 +1594,7 @@
 | 파일 | 층 | 역할 |
 |---|---|---|
 | `src/ash_industry/app/settings_overlay.py` | app | 허용 목록(`SettingsPatch`), 필드 정의 유도, 비밀값 가림, yaml 읽기와 쓰기 |
-| `src/ash_industry/ash_config.py` | config | yaml 원천(`ASH_SETTINGS_FILE`, 기본 `~/.ash/settings.yaml`) |
+| `src/ash_industry/ash_config.py` | config | yaml 원천(`ASH_SETTINGS_FILE`, 기본 `~/.ash/settings.yaml`), `ShortcutsConfig`(형식 `SHORTCUT_PATTERN`, 겹침 검사 `canonical_shortcut`) |
 | `src/ash_industry/ui/web/settings_applier.py` | ui | 저장값을 프로세스 객체에 쓰기(`changed_values`, `SettingsApplier`), 재시작 대기 키 |
 | `src/ash_industry/ui/web/process_restart.py` | ui | 자기 재시작(`ProcessRestart`): Docker 아래에서만, 응답 뒤 SIGTERM, 10초 상한 |
 | `src/ash_industry/ui/web/web_lifecycle.py` | ui | `restart_daemon`: 트리거 재생성과 daemon 재기동 |
@@ -1601,7 +1603,9 @@
 | `src/ash_industry/core/session.py` | core | `set_proactivity` |
 | `src/ash_industry/app/agent_profile.py`, `session_builder.py`, `app_context.py`, `infra_builder.py` | app | 제공자 주입(`cooldown_provider`, `threshold_provider`), `ctx.external_trigger` 보관(트리거 재생성용) |
 | `src/ash_industry/ui/web/router/settings_router.py` | ui | `GET /api/settings`, `PUT /api/settings`, `POST /api/restart`, `GET /api/health` |
-| `src/ash_industry/ui/web/static/app/settings.js` | ui | 설정 폼, 반영과 재시작 대기 표시, 데스크톱 카드, 재시작 버튼(Ion 먼저, 백엔드 자기 재시작으로 폴백) |
+| `src/ash_industry/ui/web/static/app/settings.js` | ui | 설정 폼(단축키 묶음과 안내 포함), 반영과 재시작 대기 표시, 422 이유 표시, 데스크톱 카드, 재시작 버튼(Ion 먼저, 백엔드 자기 재시작으로 폴백) |
+| `src/ash_industry/ui/web/static/app/shortcut-combo.js` | ui | 단축키 문자열 읽기와 키 이벤트 맞추기(수정키 집합이 정확히 같을 때만), 기본값 |
+| `src/ash_industry/ui/web/static/app/shortcuts.js` | ui | 단축키 설정 읽기와 keydown 하나로 동작 보내기(반복 키, 한글 조합 중, 확인 창, 승인 창은 무시. 승인 창에서도 읽기 멈춤은 받는다) |
 | `src/ash_industry/ui/web/static/app/events.js`, `shell.js` | ui | `restarting` 이벤트로 `연결 끊김 — 재시작 중` 표시 |
 
 **테스트**
@@ -1609,6 +1613,7 @@
 | 종류 | 파일 |
 |---|---|
 | 단위 | `tests/unit/test_settings_settings_overlay.py` |
+| 단위 | `tests/unit/test_settings_ash_config.py` |
 | 단위 | `tests/unit/test_settings_settings_applier.py` |
 | 단위 | `tests/unit/test_settings_process_restart.py` |
 | 단위 | `tests/unit/test_proactive_policy.py`(cooldown provider, learner reset), `tests/unit/test_thought_router.py`(threshold provider) |
@@ -1934,7 +1939,7 @@
 | ws `voice_stt_submit{data, mime, sample_rate}` | `voice_stt_result`. 말소리가 `voice.command_max_sec`(기본 12초)보다 길거나 글이 `voice.command_max_chars`(기본 120자)보다 길면 에이전트에게 한 말이 아니라 주변 대화(회의)로 보고 `ambient` 와 앞 80자 `heard` 만 보내며 아무 말도 하지 않는다(확신도보다 먼저 본다). 문장이 하나도 안 나오면(소음만 녹음) `silent` 만 보내고 되묻지 않는다. 확신도가 낮으면 `unclear` 와 되묻는 말. whisper 는 한국어와 영어 중 감지한 언어로 받아 적고(그 밖으로 감지되면 둘 중 확률이 높은 쪽으로 다시), 말 끝 무음은 VAD 로 잘라 낸다 |
 | ws 바이너리 프레임(16kHz PCM) | 점수가 임계치 이상이면 `voice_wake{score}` |
 | `GET /api/voice/phrases/{name}` | 녹음 문구 wav |
-| Web HUD 구체 클릭, 웨이크워드, 데스크톱 전역 단축키 | 음성 입력. 말로 시작하면 음성 대화가 열려 답을 읽고 다시 듣는다. 말이 없거나 타이핑하거나 읽기를 멈추면 끝난다. 서버가 `ambient` 를 돌려주면 대화를 끝내고 다시 듣지 않으며, 웨이크워드는 2분 쉰다(거듭되면 두 배씩, 최대 15분. 진짜 요청이 들어오면 바로 푼다). 회의 중 잘못 깨어나 남의 말에 답하고 그 반응에 또 답하던 되풀이를 막는다(11-17 실측) |
+| Web HUD 구체 클릭, 웨이크워드, 데스크톱 전역 단축키, HUD 단축키 `shortcuts.voice_start`(기본 `Ctrl+Shift+Enter`) | 음성 입력. 말로 시작하면 음성 대화가 열려 답을 읽고 다시 듣는다. 말이 없거나 타이핑하거나 읽기를 멈추면 끝난다. 서버가 `ambient` 를 돌려주면 대화를 끝내고 다시 듣지 않으며, 웨이크워드는 2분 쉰다(거듭되면 두 배씩, 최대 15분. 진짜 요청이 들어오면 바로 푼다). 회의 중 잘못 깨어나 남의 말에 답하고 그 반응에 또 답하던 되풀이를 막는다(11-17 실측) |
 | 설정 `voice.stt_fallback`(기본 `whisper`) | `stt_provider` 가 browser 일 때 브라우저 인식이 없거나 `network` 같은 오류로 끝나면 화면이 녹음해 서버 STT 로 보낸다. 모델은 처음 받아 적을 때 불러온다 |
 
 **처리 흐름**: `ws_tasks` 에서 `speech_text` 로 기호 제거와 금액 한글화, 필요하면 `english` 번역, `VoiceService` 가 `voice_registry` 로 고른 프로바이더 합성 또는 전사 순. 웨이크워드는 `ws_router` 에서 `WakeDetector` 순.
@@ -1957,7 +1962,7 @@
 | `src/ash_industry/voice/providers/qwen.py` | voice | Qwen3-TTS, 실패하면 Piper |
 | `src/ash_industry/ui/web/router/voice_router.py` | ui | 읽기 문구 wav REST |
 | `src/ash_industry/ui/web/static/voice.js` | ui | `VoiceManager` |
-| `src/ash_industry/ui/web/static/app/voice-ui.js` | ui | 음성 입출력 배선과 음성 대화(말로 이어 가기) 흐름 |
+| `src/ash_industry/ui/web/static/app/voice-ui.js` | ui | 음성 입출력 배선과 음성 대화(말로 이어 가기) 흐름, 듣기와 읽기 멈춤 단축키(`voice_start`, `voice_stop`) |
 | `src/ash_industry/ui/web/static/app/phrases.js` | ui | 읽기 문구 재생 |
 | `src/ash_industry/ui/web/static/app/wake.js` | ui | 웨이크워드 오디오 송신 |
 | `src/ash_industry/ui/web/static/wake-worklet.js` | ui | 80ms PCM 캡처 AudioWorklet |
@@ -1993,6 +1998,7 @@
 |---|---|
 | `ash-industry [--host] [--port]` | uvicorn 으로 Web HUD 기동(기본 `127.0.0.1:7777`, `cli`) |
 | 헤더 `HUD` / `FLOW` / `SET`, `Esc` | 화면 전환. 고른 화면은 이 브라우저에 기억한다. `Esc` 는 HUD 로 |
+| HUD 단축키(SET 의 단축키 묶음) | 듣기 토글, 읽기 멈춤, 이전, 다음 에이전트. 설정과 규칙은 settings 절 |
 | `/` 화면 | HUD 셸, 접속하면 `default` 세션(main) |
 | 종료 | 세션마다 공고화와 저장 |
 

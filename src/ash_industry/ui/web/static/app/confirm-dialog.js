@@ -7,6 +7,8 @@ const $cancel = document.getElementById('confirm-cancel');
 
 let _resolve = null;
 
+export function isConfirmOpen() { return _resolve !== null; }
+
 function close(answer) {
   if (!_resolve) return;
   $overlay.classList.add('hidden');
