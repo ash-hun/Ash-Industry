@@ -1883,3 +1883,15 @@ body:not([data-view="hud"]) .stage { visibility: hidden; }
 }
 .wf-graph .wf-arrow { fill: var(--pri-dim); }
 #settings-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; }
+
+/* 접근 키 입력 창의 입력칸. 승인 창 안에서 한 줄로 */
+.token-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 14px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid var(--line, rgba(255, 255, 255, .2));
+  color: var(--text, inherit);
+  font: inherit;
+}

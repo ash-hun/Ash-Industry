@@ -25,6 +25,7 @@ const SHELL = [
   'app/approval-wait.js',
   'app/queue.js',
   'app/confirm-dialog.js',
+  'app/token-dialog.js',
   'app/task-stars.js',
   'app/artifact.js',
   'app/brand.js',

@@ -342,6 +342,19 @@
   </div>
 </div>
 
+<!-- TOKEN MODAL: 접근 키 입력(app/token-dialog.js). 브라우저 prompt() 를 쓰지 않는다 -->
+<div class="approval-overlay hidden" id="token-overlay" role="dialog" aria-modal="true" aria-labelledby="token-title">
+  <div class="approval-box">
+    <h3 id="token-title">접근 키</h3>
+    <p class="approval-hint">서버의 ASH_SECURITY__API_KEYS 에 있는 키를 넣으세요. 이 기기에만 저장됩니다.</p>
+    <input class="token-input" id="token-input" type="password" autocomplete="off" spellcheck="false" aria-label="접근 키">
+    <div class="approval-btns">
+      <button class="btn-allow" id="token-save" type="button">저장</button>
+      <button class="btn-deny" id="token-cancel" type="button">취소</button>
+    </div>
+  </div>
+</div>
+
 <!-- MEDIA PLAYER MODAL: 도구가 만든 영상, 음악 결과물 -->
 <div class="media-overlay hidden" id="media-overlay" role="dialog" aria-modal="true" aria-labelledby="media-title">
   <div class="media-box">

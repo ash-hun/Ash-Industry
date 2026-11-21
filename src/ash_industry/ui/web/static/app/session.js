@@ -243,8 +243,10 @@ export function connect(sessionId = _currentSessionId) {
       setLinkState(false);
       if (ev.code === WS_UNAUTHORIZED) {
         // 키 불일치 — 재시도 루프 대신 키를 묻고 바로 다시 연결한다
-        if (askForToken()) connect(_currentSessionId);
-        else { $connBanner.classList.remove('hidden'); logActivity('접근 키 없음', 'err', SYSTEM); }
+        askForToken().then((ok) => {
+          if (ok) location.reload();
+          else { $connBanner.classList.remove('hidden'); logActivity('접근 키 없음', 'err', SYSTEM); }
+        });
         return;
       }
       if (ev.code === WS_UNKNOWN_AGENT) {
