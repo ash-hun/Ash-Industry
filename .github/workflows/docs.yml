@@ -22,6 +22,8 @@ concurrency:
 
 jobs:
   build:
+    # 문서 사이트(Pages)는 공개 저장소에만 있다
+    if: github.repository == 'ash-hun/Ash-Industry'
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -1343,7 +1343,7 @@
 
 ### release: 브랜치와 릴리즈
 
-**설명**: 기능 PR 은 `develop`(기본 브랜치)으로 올려 squash 머지한다. 릴리즈는 `develop` 에서 `main` 으로 PR 을 올려 merge commit 으로 머지한다(squash 로 머지하면 두 브랜치 이력이 갈라져 다음 릴리즈 PR 이 충돌한다). `main` 에 들어가면 워크플로가 지난 태그 뒤 커밋 제목으로 다음 버전을 정해 릴리즈한다. 버전은 `pyproject.toml` 한 곳이 정본이고, CLI(`--version`)와 `GET /api/health` 는 설치된 패키지 버전을 읽는다.
+**설명**: 기능 PR 은 `develop`(기본 브랜치)으로 올려 squash 머지한다. 릴리즈는 `develop` 에서 `main` 으로 PR 을 올려 merge commit 으로 머지한다(squash 로 머지하면 두 브랜치 이력이 갈라져 다음 릴리즈 PR 이 충돌한다). `main` 에 들어가면 워크플로가 지난 태그 뒤 커밋 제목으로 다음 버전을 정해 릴리즈한다. 릴리즈, 데스크톱 빌드, 문서 사이트 워크플로는 이 저장소(`ash-hun/Ash-Industry`)에서만 돌고, 포크나 다른 저장소에서는 건너뛴다. 버전은 `pyproject.toml` 한 곳이 정본이고, CLI(`--version`)와 `GET /api/health` 는 설치된 패키지 버전을 읽는다.
 
 **입력과 결과**
 

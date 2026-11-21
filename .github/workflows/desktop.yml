@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   mac:
+    if: github.repository == 'ash-hun/Ash-Industry'
     runs-on: macos-latest
     env:
       TAG: ${{ inputs.tag }}
