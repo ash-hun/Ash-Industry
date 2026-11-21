@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 from hwpx import HwpxDocument
+from openpyxl import Workbook
 from docx import Document as new_docx
 
 from docs_mcp.docs_server import DocsService, build_server
@@ -49,17 +50,17 @@ def test_render_html_and_missing_renderer(service: DocsService) -> None:
     assert "error" in svc.render_document("sub/a.docx", "pdf")
 
 
-def test_build_server_registers_nine_tools(root: Path) -> None:
+def test_build_server_registers_ten_tools(root: Path) -> None:
     server = build_server(DocsService(DocsPaths(root)))
     tools = {t.name: t for t in server._tool_manager.list_tools()}
     assert set(tools) == {
         "list_documents", "inspect_document", "plan_edit", "apply_edit", "render_document",
-        "list_templates", "get_template_schema", "register_template", "fill_template",
+        "list_templates", "get_template_schema", "register_template", "fill_template", "detect_fields",
     }
     for name in ("apply_edit", "register_template", "fill_template"):
         annotations = tools[name].annotations
         assert annotations is not None and annotations.read_only_hint is False
-    for name in ("list_templates", "get_template_schema"):
+    for name in ("list_templates", "get_template_schema", "detect_fields"):
         annotations = tools[name].annotations
         assert annotations is not None and annotations.read_only_hint
     assert tools["inspect_document"].annotations is not None and tools["inspect_document"].annotations.read_only_hint
@@ -148,3 +149,55 @@ def test_hwpx_listed_registered_filled_and_hwp_written_as_hwpx(service: DocsServ
     plan = service.plan_edit("옛양식.hwp", [{"target": "p0", "text": "본문 이영희"}])
     applied = service.apply_edit(plan["plan_id"])
     assert applied["output"] == "옛양식.edited-20261116-090001.hwpx" and applied["verify"]["ok"]
+
+
+def test_detect_register_fill_blank_docx(service: DocsService, root: Path) -> None:
+    doc = new_docx()
+    doc.add_paragraph("성명:")
+    doc.add_paragraph("")
+    doc.add_paragraph("연락처: ____")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "출장 기간"
+    table.cell(1, 0).text = "금액"
+    doc.save(str(root / "출장 양식.docx"))
+    detected = service.detect_fields("출장 양식.docx")
+    assert detected["template_id"] == "출장_양식-v1" and detected["format"] == "docx"
+    assert [(c["name"], c["type"], c["rule"]) for c in detected["candidates"]] == [
+        ("성명", "text", "anchor_text"), ("연락처", "text", "anchor_text"),
+        ("출장기간", "date_range", "table_right"), ("금액", "number", "table_right"),
+    ]
+    assert service.detect_fields("출장 양식.docx") == detected
+    fields = [{k: c[k] for k in ("name", "type", "required", "locator")} for c in detected["candidates"]]
+    registered = service.register_template("출장 양식.docx", detected["template_id"], "blank_form", fields)
+    assert registered["registered"] is True
+    values = {"성명": "홍길동", "연락처": "010-0000-0000", "출장기간": "2026-12-03 ~ 2026-12-05", "금액": "1,500"}
+    filled = service.fill_template(detected["template_id"], values)
+    assert filled["verify"] == {"ok": True, "issues": []}
+    out = service.inspect_document(filled["path"])
+    assert [p["text"] for p in out["paragraphs"]] == ["성명:", "홍길동", "연락처: 010-0000-0000"]
+    assert [c["text"] for c in out["tables"][0]["cells"]] == ["출장 기간", "2026-12-03 ~ 2026-12-05", "금액", "1500"]
+
+
+def test_detect_fields_xlsx_hwpx_and_errors(service: DocsService, root: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "신청"
+    ws["A1"] = "성명"
+    ws["A2"] = "수량"
+    ws["B2"] = 3
+    wb.save(str(root / "신청.xlsx"))
+    sheet = service.detect_fields("신청.xlsx")
+    assert sheet["format"] == "xlsx" and [(c["name"], c["locator"]) for c in sheet["candidates"]] == [
+        ("성명", {"kind": "sheet_cell", "sheet": "신청", "cell": "B1"}),
+    ]
+    doc = HwpxDocument.new()
+    doc.paragraphs[0].text = "성명:"
+    doc.add_paragraph("")
+    doc.save_to_path(root / "양식.hwpx")
+    hwpx = service.detect_fields("양식.hwpx")
+    assert hwpx["template_id"] == "양식-v1" and [c["locator"] for c in hwpx["candidates"]] == [
+        {"kind": "anchor_text", "after": "성명:"},
+    ]
+    assert service.detect_fields("sub/a.docx")["candidates"] == []
+    for bad in ("../a.docx", ".render/b.docx", "memo.txt", "none.docx"):
+        assert "error" in service.detect_fields(bad)

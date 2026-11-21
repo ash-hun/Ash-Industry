@@ -5,6 +5,7 @@ from docparse.template.template_schema import (
     scan_placeholders, schema_from_placeholders,
 )
 from docparse.parser_registry import SUPPORTED_SUFFIXES, apply, fill, inspect, render, to_html, output_suffix
+from docparse.template.field_detect import FieldCandidate, detect_fields, suggest_template_id
 from docparse.verify.verify_service import VerifyResult, verify_edit, verify_fill
 from docparse.document_model import Cell, Document, Paragraph, Run, Table
 from docparse.edit_plan import Change, EditPlan, Replacement, preview
@@ -15,6 +16,7 @@ __all__ = [
     "Cell",
     "Change",
     "Document",
+    "FieldCandidate",
     "EditPlan",
     "Paragraph",
     "RenderUnavailable",
@@ -27,6 +29,7 @@ __all__ = [
     "VerifyResult",
     "apply",
     "check_locators",
+    "detect_fields",
     "fill",
     "inspect",
     "output_suffix",
@@ -35,6 +38,7 @@ __all__ = [
     "render_value",
     "scan_placeholders",
     "schema_from_placeholders",
+    "suggest_template_id",
     "to_html",
     "validate_values",
     "verify_edit",

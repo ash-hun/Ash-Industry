@@ -31,7 +31,7 @@
 | `cli` | `ash-industry` 명령으로 Web HUD 백엔드를 띄우고 시작 세션을 고른다 | `ash-industry [--session <id>] [--agent <id>] [--host] [--port]`, `ash-industry --list-sessions` | 구현됨 |
 | `desktop` | HUD 를 창 하나로 띄우고 트레이 상주, 전역 단축키, OS 알림을 맡는 Electron 셸. GitHub Release 의 dmg 로 받는다 | `cd desktop && npm start`, Release 의 `AshIndustry-<버전>-<arch>.dmg`, 트레이 메뉴, 전역 단축키 | 구현됨 |
 | `docparse` | 행정문서(DOCX, XLSX, HWPX, HWP 읽기)를 id 가 붙은 구조로 읽고, 서식을 유지한 채 지정한 곳만 고치거나 양식 템플릿을 채우고, 렌더하는 독립 파서 패키지 | `packages/docparse`(`docparse.inspect`, `apply`, `fill`, `render`) | 구현 중 |
-| `docs_mcp` | 행정문서 MCP 서버. 문서 폴더의 문서를 읽고 편집 계획을 보인 뒤 승인된 계획만 새 파일로 저장하고, 등록한 양식 템플릿을 값으로 채운다. 어느 에이전트가 쓸지는 MCP 정책이 정한다 | docs MCP 서버의 `list_documents`, `inspect_document`, `plan_edit`, `apply_edit`, `render_document`, `list_templates`, `get_template_schema`, `register_template`, `fill_template` | 구현 중 |
+| `docs_mcp` | 행정문서 MCP 서버. 문서 폴더의 문서를 읽고 편집 계획을 보인 뒤 승인된 계획만 새 파일로 저장하고, 등록한 양식 템플릿을 값으로 채운다. 어느 에이전트가 쓸지는 MCP 정책이 정한다 | docs MCP 서버의 `list_documents`, `inspect_document`, `plan_edit`, `apply_edit`, `render_document`, `list_templates`, `get_template_schema`, `register_template`, `fill_template`, `detect_fields` | 구현 중 |
 | `extension` | 확장 디렉터리의 파이썬 패키지가 에이전트 전용 도구와 슬래시 명령을 등록한다. 개인 도구를 플랫폼 밖에 둔다 | `~/.ash/extensions/<이름>/__init__.py` 의 `register(ctx)`, `ASH_PLUGIN__EXTENSIONS_DIR` | 구현됨 |
 | `external` | 캘린더, 메일 같은 외부 변화를 주기적으로 읽어 성찰에 먹인다 | `~/.ash/external_sources/*.yaml` | 구현됨 |
 | `focus` | 한 작업을 네 sub-agent 의 도움으로 끝까지 수행하는 모드 | `/focus <작업>` (Web HUD) | 구현됨 |
@@ -335,7 +335,7 @@
 ### docparse: 행정문서 파서
 | 단위 | `desktop/test/window_hide.test.js` (`npm test`) |
 
-**설명**: 행정문서를 포맷과 무관한 구조(IR)로 읽고, 편집 계획을 서식을 유지한 채 적용하고, 결과를 검증하고, HTML, PDF, PNG 로 렌더하는 파서. uv workspace 의 독립 패키지(`packages/docparse`, 자기 버전과 테스트)라 ash_industry 를 모르고, 에이전트와 MCP 서버는 공개 API(`inspect`, `apply`, `preview`, `verify_edit`, `fill`, `verify_fill`, 템플릿 스키마 함수, `render`, `to_html`)와 IR 만 본다. 포맷을 더할 때는 `FormatAdapter`(inspect, replace, fill, to_html) 하나를 더하고 `parser_registry` 에 적는다. 지금은 DOCX, XLSX, HWPX. `.hwp` 는 읽어서 결과를 HWPX 로 쓴다.
+**설명**: 행정문서를 포맷과 무관한 구조(IR)로 읽고, 편집 계획을 서식을 유지한 채 적용하고, 결과를 검증하고, HTML, PDF, PNG 로 렌더하는 파서. uv workspace 의 독립 패키지(`packages/docparse`, 자기 버전과 테스트)라 ash_industry 를 모르고, 에이전트와 MCP 서버는 공개 API(`inspect`, `apply`, `preview`, `verify_edit`, `fill`, `verify_fill`, 템플릿 스키마 함수, `detect_fields`, `render`, `to_html`)와 IR 만 본다. 포맷을 더할 때는 `FormatAdapter`(inspect, replace, fill, to_html) 하나를 더하고 `parser_registry` 에 적는다. 지금은 DOCX, XLSX, HWPX. `.hwp` 는 읽어서 결과를 HWPX 로 쓴다.
 
 **입력과 결과**
 
@@ -352,6 +352,8 @@
 | `validate_values(schema, values)` | 모르는 필드, 빠진 필수 필드, date(`YYYY-MM-DD`), date_range(`시작 ~ 끝`, 시작이 끝보다 늦지 않게), number(숫자나 쉼표 있는 숫자 글), max_chars, max_lines. 문제 목록 |
 | `render_value(field, value)` | 문서에 들어갈 글. 숫자는 쉼표 없이, 기간은 `시작 ~ 끝` |
 | `fill(path, schema, values, out_path)` | 값 검사(문제가 있으면 `TemplateValueError`, 파일은 만들지 않음) 뒤 로케이터마다 넣어 저장하고 다시 읽은 구조. 원본은 두고 같은 값이면 같은 결과. DOCX 와 HWPX 자리표시자는 run 여럿에 걸쳐도 시작 run 의 서식으로 합치고 토큰 밖 run 은 그대로 둔다. table_cell 은 셀 전체 치환, anchor_text 는 기준 글 뒤에 글이 있으면 그 글을, 없으면 다음 문단을 바꾼다. XLSX sheet_cell 은 빈 칸에도 쓰고 number 필드는 숫자로, 칸 전체가 토큰 하나인 자리표시자도 숫자로 둔다. `=` 로 시작하는 값은 수식이 아닌 글로 저장한다. 자리가 없으면 `KeyError` |
+| `detect_fields(document)` | 빈 양식의 채울 자리 후보 `FieldCandidate[{name, label, type, required, locator, rule, confidence}]`. 순수 함수라 같은 문서면 같은 목록과 순서. 규칙은 본문 문단 `라벨:`(전각 `：` 포함) 뒤가 비었거나 밑줄(`_`, `＿`)만 있으면 anchor_text(뒤가 비면 다음 문단이 빈 줄일 때만, 같은 기준 글이 앞 문단에 있으면 뺀다), 표에서 라벨 칸의 오른쪽 칸이 비면 table_cell(라벨이 20자 이하이고 문장이 아니면 high, 아니면 low), 오른쪽이 없거나 차 있고 바로 아래 칸이 비면 아래 칸(low), XLSX 는 글 라벨 칸의 오른쪽 주소가 비면 sheet_cell(숫자, 수식, 병합 머리 칸은 라벨로 보지 않음). `{{` 가 든 칸과 문단은 라벨도 빈 칸도 아니고, 같은 칸은 오른쪽 규칙이 먼저다. type 은 라벨 낱말로(기간 date_range, 일자/날짜/생년월일/일시 date, 금액/수량/비용/개수/액 number, 사유/내용/목적/비고/요청사항 long_text, 그 밖 text), name 은 라벨의 글자와 숫자만(비면 `field`, 겹치면 `_2`, `_3`). `to_field()` 로 `TemplateField` |
+| `suggest_template_id(path)` | 파일 이름(NFC 로 합친 뒤 허용 밖 글자는 `_`)에 `-v1`. 남는 글자가 없으면 `form-v1` |
 | `verify_fill(after, schema, values)` | 값 검사, 필드의 `{{이름}}` 이 남지 않았는가, 채운 값이 제자리(셀, 시트 칸, 문단 안)에 있는가 |
 | `render(path, "html" \| "pdf" \| "png", out_dir)` | html 은 어댑터(DOCX 는 mammoth, XLSX 와 HWPX 는 직접 만든 표와 문단. 본문 이스케이프), pdf 는 LibreOffice headless, png 는 pdftoppm. HWPX 와 HWP 는 LibreOffice 가 열지 못해 rhwp 가 프로세스 안에서 pdf 와 쪽마다 png(`<이름>-<쪽>.png`, 110dpi)를 만든다(200쪽 넘으면 거부). 만든 파일 경로 목록. 프로그램이 없거나 실패하면 `RenderUnavailable` |
 | `output_suffix(path)` | 결과 파일 확장자. 원본 그대로이고 `.hwp` 만 `.hwpx` |
@@ -375,6 +377,7 @@
 | `packages/docparse/src/docparse/render/rhwp_renderer.py` | client | rhwp 로 HWPX, HWP 의 PDF, PNG |
 | `packages/docparse/src/docparse/verify/verify_service.py` | service | 편집과 채우기 결과 검증(순수) |
 | `packages/docparse/src/docparse/template/template_schema.py` | schema | 템플릿 스키마, 로케이터, 자리표시자 찾기, 값 검사와 글 만들기(순수) |
+| `packages/docparse/src/docparse/template/field_detect.py` | service | 빈 양식 필드 후보 탐지와 템플릿 id 제안(순수) |
 
 **테스트**
 
@@ -387,8 +390,9 @@
 | 단위 | `packages/docparse/tests/test_verify_service.py` |
 | 단위 | `packages/docparse/tests/test_render_service.py` |
 | 단위 | `packages/docparse/tests/test_template_schema.py` |
+| 단위 | `packages/docparse/tests/test_field_detect.py`(규칙마다 정상과 경계, 병합 칸 중복 없음, 형식과 이름 추측, 템플릿 id) |
 
-**제약과 미구현**: 빈 칸 탐지(`detect_fields`), PPTX, PDF 는 다음 단계다. HWPX 는 본문 문단에 바로 든 표만 읽고(셀 안 표, 글상자, 머리글, 바닥글, 각주는 보지 않음, `# ponytail`), HWP 는 python-hwpx 가 HWPX 모델로 바꿔 열어 옮기지 못한 내용이 결과에서 빠질 수 있다(`meta.unconverted`). rhwp 렌더는 프로세스 안이라 시간 제한이 없다(`# ponytail`). 테스트의 HWPX, HWP 는 python-hwpx 로 만든 것이고 한/글로 만든 실제 공고 양식은 아직 확인하지 않았다. DOCX 의 중첩 표는 읽지 않고, 하이퍼링크 안의 run 은 치환하지 않는다(`# ponytail`). 채우기는 DOCX 머리글, 바닥글, 중첩 표, 하이퍼링크 안을 보지 않고(`# ponytail`), 그림이 든 run 에 토큰이 있으면 그 run 의 그림이 사라진다. XLSX 자리표시자는 수식 칸 안에서 바꾸지 않는다. anchor_text 는 본문 문단을 먼저, 그다음 표 칸마다 그 칸의 문단 안에서 처음 나온 기준 글만 쓴다. XLSX 는 openpyxl 이 차트와 그림을 저장하지 않는다(`# ponytail`). 테스트는 코드로 만든 작은 파일로 왕복하고, LibreOffice 렌더는 프로그램이 없는 경우만 검사한다(실제 렌더는 ash-mcp 컨테이너에서 수동 확인). rhwp 렌더는 테스트에서 실제로 PDF, PNG 를 만든다.
+**제약과 미구현**: PPTX, PDF 는 다음 단계다. `detect_fields` 는 규칙 기반이라 빈 괄호(`(   )`), `□` 체크 칸, 그림으로 본 검토, 자리표시자 사본 만들기는 하지 않는다. IR 에 병합 폭이 없어 표의 오른쪽 칸은 같은 행에서 다음으로 실린 칸으로 보고(세로 병합이 끼면 틀릴 수 있다), XLSX 병합 머리 칸은 라벨로 쓰지 않는다(`# ponytail`). 후보는 사용자가 확인하는 초안이다. HWPX 는 본문 문단에 바로 든 표만 읽고(셀 안 표, 글상자, 머리글, 바닥글, 각주는 보지 않음, `# ponytail`), HWP 는 python-hwpx 가 HWPX 모델로 바꿔 열어 옮기지 못한 내용이 결과에서 빠질 수 있다(`meta.unconverted`). rhwp 렌더는 프로세스 안이라 시간 제한이 없다(`# ponytail`). 테스트의 HWPX, HWP 는 python-hwpx 로 만든 것이고 한/글로 만든 실제 공고 양식은 아직 확인하지 않았다. DOCX 의 중첩 표는 읽지 않고, 하이퍼링크 안의 run 은 치환하지 않는다(`# ponytail`). 채우기는 DOCX 머리글, 바닥글, 중첩 표, 하이퍼링크 안을 보지 않고(`# ponytail`), 그림이 든 run 에 토큰이 있으면 그 run 의 그림이 사라진다. XLSX 자리표시자는 수식 칸 안에서 바꾸지 않는다. anchor_text 는 본문 문단을 먼저, 그다음 표 칸마다 그 칸의 문단 안에서 처음 나온 기준 글만 쓴다. XLSX 는 openpyxl 이 차트와 그림을 저장하지 않는다(`# ponytail`). 테스트는 코드로 만든 작은 파일로 왕복하고, LibreOffice 렌더는 프로그램이 없는 경우만 검사한다(실제 렌더는 ash-mcp 컨테이너에서 수동 확인). rhwp 렌더는 테스트에서 실제로 PDF, PNG 를 만든다.
 
 ---
 
@@ -408,8 +412,10 @@
 | `list_templates()` | 등록된 템플릿마다 `template_id`, `format`, `kind`, `source`(등록한 원본의 상대 경로), `fields`(개수) |
 | `get_template_schema(template_id)` | 위 요약과 `fields[{name, type, required, max_chars, max_lines}]`. 로케이터는 싣지 않는다. 모르는 id 는 `error` |
 | `register_template(path, template_id, kind, fields)` | placeholder 는 `{{이름}}` 을 찾아 필드로(fields 는 type 등 덮기), blank_form 은 fields 에 locator 필수. 자리가 문서에 없으면 `error` 와 `issues`, 등록하지 않음. 결과는 요약, `registered`, `fields`. 같은 id 와 같은 원본을 다시 부르면 `registered: false` 로 있던 것을 돌려주고, 같은 id 에 원본이 다르면 새 버전 id 를 요구하는 `error` |
+| `detect_fields(path)` | `{template_id: 제안 id, format, candidates[{name, label, type, required, locator, rule, confidence}]}`. 아무것도 저장하지 않고 같은 파일이면 같은 결과. 후보의 name, type, required, locator 는 그대로 `register_template(kind=blank_form)` 의 fields 가 된다. 200개를 넘으면 앞 200개와 `truncated`. 경로 검사와 20MB 제한은 다른 도구와 같고 오류는 `error` |
 | `fill_template(template_id, values)` | 값 검사에 걸리면 `error` 와 `issues`(파일 없음). 통과하면 원본 자리 옆 `<이름>.filled-<시각>.<확장자>` 에 저장하고 `{template_id, fill_id, path, verify{ok, issues}}`. 검증이 실패해도 파일은 남기고 이유를 싣는다. 같은 템플릿과 같은 값이면 같은 `fill_id` 라 다시 불러도 처음 결과를 그대로 돌려주고 파일을 더 만들지 않는다. 같은 초에 다른 값으로 채워 이름이 겹치면 `-<fill_id>` 를 붙인다 |
 | 사용자 "출장신청서 써줘. 12월 3일부터 5일까지" | 에이전트가 list_templates, get_template_schema 로 필드를 보고 빠진 필수 값을 묻고, 다 모이면 fill_template(승인) 결과의 경로와 검증을 전한다 |
+| 사용자 "이 빈 양식 등록해줘" | 에이전트가 detect_fields 후보를 한 줄씩(이름, 라벨, 형식, 위치) 보이고, 사용자가 빼거나 고쳐 확정한 목록으로만 register_template(blank_form, 승인) |
 | 사용자 "출장신청서 기간을 12월 3일에서 5일로 바꿔" | 에이전트가 inspect 로 id 를 고르고 plan_edit 결과를 "대상 id: 전 → 후" 로 보인 뒤, 사용자가 맞다고 하면 apply_edit |
 
 **처리 흐름**: `DocsPaths` 경로 검사, `docparse.inspect`, `preview` 로 `PlanStore` 에 계획 보관, 승인 뒤 `docparse.apply` 와 `verify_edit`, 결과 보관 순. 템플릿은 등록 때 `inspect`, 스키마 만들기, `check_locators`, `TemplateStore` 에 원본 사본과 `schema.json` 쓰기, 채울 때 `validate_values`, `fill_id` 로 기록 찾기, 없으면 원본 사본에 `docparse.fill`, `verify_fill`, `fills/<fill_id>.json` 쓰기 순. 파일은 임시 파일에 쓴 뒤 이름을 바꾼다. 20MB 넘는 파일은 열지 않는다.
@@ -418,7 +424,7 @@
 
 | 파일 | 층 | 역할 |
 |---|---|---|
-| `packages/docs_mcp/src/docs_mcp/docs_server.py` | api | MCPServer 와 도구 아홉 개(`DocsService`), 주석(readOnlyHint) |
+| `packages/docs_mcp/src/docs_mcp/docs_server.py` | api | MCPServer 와 도구 열 개(`DocsService`), 주석(readOnlyHint) |
 | `packages/docs_mcp/src/docs_mcp/docs_paths.py` | common | 문서 폴더 안 경로 검사(숨김 이름 거부), 결과, 렌더, 템플릿 자리, 목록 |
 | `packages/docs_mcp/src/docs_mcp/plan_store.py` | repository | 편집 계획 보관(원본 크기와 수정 시각으로 id) |
 | `packages/docs_mcp/src/docs_mcp/template_store.py` | repository | 템플릿 스키마, 원본 사본, 채우기 기록을 `.templates/` 에 파일로(원본 sha256, `fill_id`) |
@@ -431,13 +437,13 @@
 | 종류 | 파일 |
 |---|---|
 | 단위 | `packages/docs_mcp/tests/test_docs_paths.py` |
-| 단위 | `packages/docs_mcp/tests/test_docs_server.py` |
+| 단위 | `packages/docs_mcp/tests/test_docs_server.py`(detect_fields 에서 등록과 채우기까지 DOCX, XLSX 와 HWPX 탐지) |
 | 단위 | `packages/docs_mcp/tests/test_template_store.py` |
 | 단위 | `tests/unit/test_mcp_mcp_loader.py`, `tests/unit/test_policy_mcp_policy.py`(주석 이름) |
 
 **보안**: 경로는 문서 폴더 안만(`..`, 절대 경로, `~`, `.` 으로 시작하는 이름 거부. `.templates`, `.render` 는 도구 경로로 열 수 없다). 템플릿 id 는 패턴(한글, 영문, 숫자, `-`, `_`)만 받아 폴더 밖을 가리키지 못한다. 채우는 값은 XLSX 에서 수식이 되지 않게 글로 저장한다. 문서 본문은 데이터이고 에이전트 지시문이 본문 속 지시를 따르지 않게 한다. 어느 에이전트가 docs 도구를 쓰는지는 MCP 정책 `agents.<id>.servers` 로 가른다(로컬 정책 파일). 호출 기록에는 인자가 60자까지 남으므로 개인정보가 든 긴 값은 잘린다.
 
-**제약과 미구현**: 편집 계획은 서버 메모리에만 있어 ash-mcp 가 다시 뜨면 `plan_edit` 부터 다시 한다(`# ponytail`). HUD 에 파일 올리기와 미리보기 화면이 없어 파일은 문서 폴더에 직접 두고 결과도 거기서 연다. 렌더 PNG 는 경로만 돌려주고 에이전트가 그림을 보지는 않는다. 템플릿을 지우거나 고치는 도구는 없다(원본이 바뀌면 새 버전 id 로 등록). 채운 결과 파일을 지워도 같은 값으로 다시 부르면 기록만 돌려준다. 빈 양식 필드 자동 탐지, HWPX, PPTX, PDF 는 다음 단계다.
+**제약과 미구현**: 편집 계획은 서버 메모리에만 있어 ash-mcp 가 다시 뜨면 `plan_edit` 부터 다시 한다(`# ponytail`). HUD 에 파일 올리기와 미리보기 화면이 없어 파일은 문서 폴더에 직접 두고 결과도 거기서 연다. 렌더 PNG 는 경로만 돌려주고 에이전트가 그림을 보지는 않는다. 템플릿을 지우거나 고치는 도구는 없다(원본이 바뀌면 새 버전 id 로 등록). 채운 결과 파일을 지워도 같은 값으로 다시 부르면 기록만 돌려준다. PPTX, PDF 는 다음 단계다. 빈 양식 필드 탐지의 범위 밖은 docparse 절의 제약과 같다.
 
 ---
 
