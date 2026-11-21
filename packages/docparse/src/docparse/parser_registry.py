@@ -1,5 +1,6 @@
 """[service] 확장자로 어댑터를 고르는 입구. 에이전트 쪽은 이 함수들만 부른다."""
 
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 from collections.abc import Mapping
@@ -8,15 +9,17 @@ from docparse.template.template_schema import TemplateSchema, TemplateValueError
 from docparse.render.render_service import LibreOfficeRenderer
 from docparse.adapters.docx_adapter import DocxAdapter
 from docparse.adapters.hwpx_adapter import HwpxAdapter
+from docparse.adapters.pptx_adapter import PptxAdapter
 from docparse.adapters.xlsx_adapter import XlsxAdapter
 from docparse.render.rhwp_renderer import RhwpRenderer
+from docparse.adapters.pdf_adapter import PdfAdapter
 from docparse.parser_protocol import FormatAdapter
 from docparse.document_model import Document
 from docparse.edit_plan import EditPlan
 
 RenderFormat = Literal["html", "pdf", "png"]
 
-_ADAPTERS: tuple[FormatAdapter, ...] = (DocxAdapter(), XlsxAdapter(), HwpxAdapter())
+_ADAPTERS: tuple[FormatAdapter, ...] = (DocxAdapter(), XlsxAdapter(), HwpxAdapter(), PptxAdapter(), PdfAdapter())
 SUPPORTED_SUFFIXES: tuple[str, ...] = tuple(s for a in _ADAPTERS for s in a.suffixes)
 # HWP 는 읽기만 하고 결과는 HWPX 로 쓴다. LibreOffice 는 HWPX 를 열지 못해 rhwp 가 그린다
 WRITE_SUFFIX: dict[str, str] = {".hwp": ".hwpx"}
@@ -70,7 +73,8 @@ def render(
     path: Path, fmt: RenderFormat, out_dir: Path, renderer: LibreOfficeRenderer | None = None,
     hwp_renderer: RhwpRenderer | None = None,
 ) -> list[Path]:
-    """html 은 어댑터가, pdf 와 png 는 HWP 계열이면 rhwp 가, 나머지는 LibreOffice 가 만든다. 만든 파일 경로 목록."""
+    """html 은 어댑터가, pdf 와 png 는 HWP 계열이면 rhwp 가, PDF 원본이면 pdftoppm 만, 나머지는 LibreOffice 가
+    만든다. 만든 파일 경로 목록."""
     out_dir.mkdir(parents=True, exist_ok=True)
     if fmt == "html":
         target = out_dir / f"{path.stem}.html"
@@ -80,6 +84,12 @@ def render(
         rhwp = hwp_renderer or _RHWP
         return [rhwp.to_pdf(path, out_dir)] if fmt == "pdf" else rhwp.to_png(path, out_dir)
     office = renderer or LibreOfficeRenderer()
+    if path.suffix.lower() == ".pdf":
+        # 원본이 이미 PDF 다. 보여 줄 파일이 렌더 폴더 안에 모이도록 사본을 둔다
+        copy = out_dir / f"{path.stem}.pdf"
+        if copy.resolve() != path.resolve():
+            shutil.copyfile(path, copy)
+        return [copy] if fmt == "pdf" else office.to_png(copy, out_dir)
     pdf = office.to_pdf(path, out_dir)
     if fmt == "pdf":
         return [pdf]

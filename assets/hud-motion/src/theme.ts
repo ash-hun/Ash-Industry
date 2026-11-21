@@ -3,14 +3,14 @@ import { Easing } from "remotion";
 
 export const theme = {
   colors: {
-    bg: "#05080F",
-    bgAlt: "#0B1220",
-    primary: "#8DD6F5", // HUD 리액터의 하늘색. 프레임당 한 요소에만
-    accent: "#D98CFF", // 🔔 proactive 의 보라
-    text: "#EAF2F8",
-    textDim: "#8FA3B5",
-    hairline: "rgba(141, 214, 245, 0.18)",
-    glow: "rgba(141, 214, 245, 0.45)",
+    bg: "#14161A", // Ash Industry 브랜드 바탕
+    bgAlt: "#1C1F24",
+    primary: "#F0642D", // 브랜드 주황. 프레임당 한 요소에만
+    accent: "#E6E8EA",
+    text: "#E6E8EA",
+    textDim: "#8A9098",
+    hairline: "rgba(230, 232, 234, 0.16)",
+    glow: "rgba(240, 100, 45, 0.45)",
   },
   fonts: {
     display: "'Noto Sans KR', 'Space Grotesk', sans-serif",

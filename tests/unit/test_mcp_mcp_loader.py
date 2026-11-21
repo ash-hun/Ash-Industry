@@ -50,6 +50,22 @@ async def test_wrapper_attaches_media_artifacts_only_for_the_media_server():
     assert [(a.kind, a.path) for a in result.artifacts] == [("video", "out/manim/x/Hello.mp4")]
 
 
+async def test_wrapper_attaches_document_render_for_the_docs_server():
+    text = '{"path": "a.docx", "format": "png", "files": [".render/a/a-1.png", ".render/a/a-2.png"]}'
+    with patch(CALL_TOOL, new_callable=AsyncMock, return_value=text):
+        docs = MCPToolWrapper(
+            server_config=MCPServerConfig(name="docs", transport="streamable-http", url="http://m/mcp"),
+            tool_name="render_document", description="", input_schema={},
+        )
+        result = await docs.execute("c1", {"path": "a.docx"})
+        other = await _wrapper().execute("c2", {})
+
+    assert other.artifacts == []
+    assert [(a.kind, a.store, a.title, a.pages) for a in result.artifacts] == [
+        ("document", "docs", "a.docx", [".render/a/a-1.png", ".render/a/a-2.png"]),
+    ]
+
+
 async def _hang(*a, **k):  # type: ignore[no-untyped-def]
     await asyncio.sleep(10)
 

@@ -5,13 +5,13 @@ title: Document Tools
 
 # Document Tools
 
-문서 도구는 에이전트가 문서 폴더의 행정문서(DOCX, XLSX, HWPX, HWP)를 읽고, 서식을 지킨 채 고치고, 자주 쓰는 양식을 템플릿으로 등록해 값만 받아 채우게 해 주는 MCP 서버(`docs`)다. 서버는 `ash-mcp` 컨테이너 안에서 다른 MCP 서버와 함께 돌고, 에이전트에게는 보통 MCP 도구처럼 보인다. 고친 결과는 언제나 새 파일로 저장하고 원본은 덮어쓰지 않는다. 이 페이지는 지원 형식, 고치는 흐름, 템플릿, 안전장치, 에이전트에게 도구를 주는 방법을 차례로 정리한다.
+문서 도구는 에이전트가 문서 폴더의 행정문서(DOCX, XLSX, HWPX, HWP, PPTX, PDF)를 읽고, 서식을 지킨 채 고치고, 자주 쓰는 양식을 템플릿으로 등록해 값만 받아 채우게 해 주는 MCP 서버(`docs`)다. 서버는 `ash-mcp` 컨테이너 안에서 다른 MCP 서버와 함께 돌고, 에이전트에게는 보통 MCP 도구처럼 보인다. 고친 결과는 언제나 새 파일로 저장하고 원본은 덮어쓰지 않는다. 이 페이지는 지원 형식, 고치는 흐름, 템플릿, 안전장치, 에이전트에게 도구를 주는 방법을 차례로 정리한다.
 
 ## 무엇을 할 수 있나
 
 | 도구 | 하는 일 | 쓰기 |
 |---|---|---|
-| `list_documents` | 문서 폴더(또는 그 아래 `subdir`)의 DOCX, XLSX, HWPX, HWP 목록. 상대 경로, 크기, 수정 시각 | |
+| `list_documents` | 문서 폴더(또는 그 아래 `subdir`)의 DOCX, XLSX, HWPX, HWP, PPTX, PDF 목록. 상대 경로, 크기, 수정 시각 | |
 | `inspect_document` | 문단과 표 셀에 id 를 붙여 보인다. 빈 문단은 기본으로 뺀다(`include_empty`) | |
 | `plan_edit` | 바꿀 곳(`target` id 와 새 글)을 받아 바뀔 곳의 전과 후, 문제 목록, `plan_id` 를 돌려준다. 파일은 건드리지 않는다 | |
 | `apply_edit` | `plan_id` 의 계획을 새 파일에 적용하고 결과를 다시 읽어 검증한다 | 승인 |
@@ -31,8 +31,10 @@ title: Document Tools
 | XLSX | 시트 하나가 표 하나, 셀에 주소(`B3`) | 된다. 숫자였던 칸은 숫자로 둔다 | `.xlsx` | HTML, PDF, PNG |
 | HWPX | 본문 문단, 본문에 바로 든 표 | 된다. 글자 모양을 남기고 손대지 않은 부분은 바이트 그대로 둔다 | `.hwpx` | HTML. PDF, PNG 는 아래 한계 참고 |
 | HWP | 된다(HWPX 모델로 바꿔 연다) | 된다 | `.hwpx` 로 저장 | HWPX 와 같다 |
+| PPTX | 글 도형의 문단(`s<슬라이드>sh<도형>p<줄>`), 표 | 된다. 첫 run 의 서식을 남긴다 | `.pptx` | HTML, PDF, PNG |
+| PDF | 쪽마다 글 줄, AcroForm 폼 필드 | 본문은 고치지 않는다. 폼 필드만 채운다 | `.pdf` | HTML, PDF(사본), PNG |
 
-HWPX 와 HWP 는 python-hwpx 로 읽고 쓰며, PDF 와 PNG 는 rhwp 로 그린다. DOCX 와 XLSX 의 PDF 는 LibreOffice, PNG 는 pdftoppm 이 만든다. PDF 와 PNG 는 원본 옆 `.render/<이름>/` 아래에 저장하고 도구는 경로만 돌려준다.
+HWPX 와 HWP 는 python-hwpx 로 읽고 쓰며, PDF 와 PNG 는 rhwp 로 그린다. DOCX, XLSX, PPTX 의 PDF 는 LibreOffice, PNG 는 pdftoppm 이 만든다. PDF 원본은 LibreOffice 없이 pdftoppm 으로 바로 그린다. PDF 와 PNG 는 원본 옆 `.render/<이름>/` 아래에 저장하고 도구는 경로만 돌려준다.
 
 :::warning
 
@@ -40,7 +42,7 @@ HWPX 와 HWP 의 PDF, PNG 렌더는 지금 Linux 컨테이너(`ash-mcp`)에서 �
 
 :::
 
-PPTX 와 PDF 원본은 아직 지원하지 않는다. HWP 원본을 열 때 HWPX 로 옮기지 못한 내용이 있으면 `inspect_document` 결과에 그 수가 실리고, 그 내용은 결과 파일에서 빠질 수 있다.
+PDF 폼 필드를 채우면 보는 프로그램이 값의 외형을 다시 그리도록 표시해 둔다. 그래서 PDF 뷰어에서는 값이 보여도 PNG 렌더에는 빈칸으로 보일 수 있다. HWP 원본을 열 때 HWPX 로 옮기지 못한 내용이 있으면 `inspect_document` 결과에 그 수가 실리고, 그 내용은 결과 파일에서 빠질 수 있다.
 
 ## 고치는 흐름
 
@@ -61,14 +63,16 @@ PPTX 와 PDF 원본은 아직 지원하지 않는다. HWP 원본을 열 때 HWPX
 | `placeholder` | 문서에 `{{성명}}`, `{{기간}}` 같은 자리표시자를 미리 적어 둔 양식 | 자리표시자를 찾아 필드로 만든다. `fields` 는 같은 이름 필드의 형식 등을 덮어쓸 때만 넘긴다 |
 | `blank_form` | 자리표시자 없이 빈칸만 있는 양식 | `fields` 마다 자리(locator)를 적는다. 보통 `detect_fields` 의 후보를 확인해 넘긴다 |
 
-필드 자리는 네 가지로 가리킨다.
+필드 자리는 여섯 가지로 가리킨다.
 
 | locator | 가리키는 곳 | 예 |
 |---|---|---|
 | `placeholder` | 자리표시자 토큰 | `{"kind": "placeholder", "token": "{{성명}}"}` |
-| `table_cell` | DOCX, HWPX 표의 셀(표, 행, 열 모두 0부터). 셀 전체를 바꾼다 | `{"kind": "table_cell", "table": 0, "row": 2, "col": 1}` |
+| `table_cell` | DOCX, HWPX, PPTX 표의 셀(표, 행, 열 모두 0부터. PPTX 표는 슬라이드를 가로질러 센다). 셀 전체를 바꾼다 | `{"kind": "table_cell", "table": 0, "row": 2, "col": 1}` |
 | `anchor_text` | DOCX, HWPX 문단의 기준 글 뒤. 같은 문단에 뒤 글이 있으면 그 글을, 없으면 다음 문단을 바꾼다 | `{"kind": "anchor_text", "after": "신청 사유:"}` |
 | `sheet_cell` | XLSX 의 시트와 셀 주소. 빈 칸에도 쓴다 | `{"kind": "sheet_cell", "sheet": "신청서", "cell": "C4"}` |
+| `shape_text` | PPTX 슬라이드(0부터)의 글 도형(shape_id). 도형 글 전체를 바꾼다 | `{"kind": "shape_text", "slide": 0, "shape": 3}` |
+| `form_field` | PDF AcroForm 필드의 전체 이름. `detect_fields` 가 폼 필드를 그대로 후보로 낸다 | `{"kind": "form_field", "name": "applicant.name"}` |
 
 필드는 이름, 형식, 필수 여부, 글자 수 제한(`max_chars`), 줄 수 제한(`max_lines`)을 가진다. 형식은 `text`, `long_text`, `date`(`YYYY-MM-DD`), `date_range`(`시작 ~ 끝`, 시작이 끝보다 늦으면 안 된다), `number`(숫자나 쉼표 있는 숫자) 다섯이다. 템플릿 id 는 한글, 영문, 숫자, `-`, `_` 로 64자까지다.
 
@@ -163,9 +167,9 @@ Docker Compose 로 띄우면 별도 설정 없이 `docs` 서버가 `ash-mcp` 컨
 ASH_DOCS_DIR=~/Documents/ash   # 문서 폴더. 컨테이너 안 /data/documents 로 붙는다
 ```
 
-- 문서는 이 폴더에 직접 넣고, 결과 파일도 이 폴더에서 연다. HUD 에서 파일을 올리거나 미리보는 화면은 아직 없다
+- 문서는 이 폴더에 직접 넣고, 결과 파일도 이 폴더에서 연다. HUD 에서 파일을 올리는 화면은 아직 없다
 - `ASH_MCP_SERVERS` 를 직접 적었다면 `{"name": "docs", "transport": "streamable-http", "url": "http://ash-mcp:8001/mcp", "timeout": 180}` 항목을 넣어야 도구가 보인다
-- 렌더 PNG 는 경로만 돌려주고 에이전트가 그림을 보지는 않는다
+- `render_document` 가 PNG 나 PDF 를 만들면 HUD 에 문서 창이 떠 쪽을 넘겨 볼 수 있다. 백엔드는 같은 폴더를 읽기 전용으로 붙여 `.render/` 아래 파일만 내준다(`GET /api/docs/files/{path}`). 에이전트가 그림을 보지는 않는다
 
 ## 한계
 

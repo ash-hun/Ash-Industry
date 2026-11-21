@@ -5,6 +5,7 @@
 결과: public/hud_full.mp4 (1600x900), public/sphere.mp4 (구체 크롭 760x760)
 """
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -13,7 +14,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 OUT = Path(__file__).parent / "public"
-BASE = "http://localhost:7777"
+BASE = os.environ.get("HUD_URL", "http://localhost:7777")
 SIZE = {"width": 1600, "height": 900}
 STATES = [("idle", 4000), ("thinking", 4000), ("tool_running", 3000), ("speaking", 3000)]
 # 1600x900 레이아웃에서 구체 링의 바깥 경계. 리액터는 가운데 열에 있다.

@@ -205,6 +205,7 @@ class WorkflowConfig(BaseModel):
 
     backend: Literal["in_memory", "postgres"] = "in_memory"
     postgres_dsn: str | None = None  # None이면 session/memory DSN fallback
+    layout_path: str = "~/.ash/workflow_layout.json"  # 그래프에서 옮긴 노드 자리. 설치 하나에 하나
 
 
 class AgentConfig(BaseModel):
@@ -498,6 +499,14 @@ class CreativeConfig(BaseModel):
     dir: str = "/data/creative"
 
 
+class DocsConfig(BaseModel):
+    """행정문서 폴더. compose 가 ASH_DOCS_DIR 를 여기 읽기 전용으로 마운트하고 docs MCP 서버가 같은 폴더를 쓴다."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    dir: str = "/data/documents"
+
+
 class AshSettings(BaseSettings):
     """
     최상위 설정 — .env 또는 환경변수에서 자동 로딩.
@@ -534,6 +543,7 @@ class AshSettings(BaseSettings):
     procedures: ProcedureConfig = Field(default_factory=ProcedureConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     creative: CreativeConfig = Field(default_factory=CreativeConfig)
+    docs: DocsConfig = Field(default_factory=DocsConfig)
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     debug: bool = False

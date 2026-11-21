@@ -97,6 +97,8 @@ services:
       - ./mcp/external_sources:/root/.ash/external_sources:ro
       # 미디어 결과물 폴더. 확장이나 외부 워커가 쓴 영상, 음악, 이미지를 HUD 가 /data/creative 에서 읽어 보여 준다
       - ${ASH_CREATIVE_DIR:-~/Creative/ash}:/data/creative
+      # 행정문서 폴더. HUD 문서 창이 docs 서버가 만든 .render/ 의 쪽 그림과 PDF 를 읽는다. 쓰기는 ash-mcp 만 한다
+      - ${ASH_DOCS_DIR:-~/Documents/ash}:/data/documents:ro
       # 로컬 코드를 그대로 쓴다 — 파이썬 수정 후 이미지 재빌드 없이
       # `docker compose restart ash-backend` 만으로 반영된다.
       - ./src:/app/src

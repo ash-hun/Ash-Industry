@@ -1,15 +1,16 @@
 """모션그래픽 소재 — 떠 있는 Web HUD(localhost:7777)에서 상태별 화면을 찍어 public/ 에 넣는다.
 
 서버 이벤트는 window.ashDebug.handleMessage 로 흉내 내므로 LLM 을 기다리지 않는다.
-    uv run --with playwright python assets/hud-motion/capture.py
+    HUD_URL=http://localhost:7788 uv run --with playwright python assets/hud-motion/capture.py  # 빈 데모 백엔드 권장
 """
 
+import os
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 OUT = Path(__file__).parent / "public"
-BASE = "http://localhost:7777"
+BASE = os.environ.get("HUD_URL", "http://localhost:7777")
 VIEWPORT = {"width": 1600, "height": 900}
 
 PROACTIVE = "내일 10시 배포 결과 공유 전에, 열린 약속 세 개를 체크리스트로 묶어 둘까요?"
@@ -42,10 +43,7 @@ with sync_playwright() as pw:
     shot(page, "hud_idle")
 
     # 요청 → 💭 → 도구 실행 중
-    page.fill("#chat-input", "내일 오전 10시에 팀에 배포 결과를 공유하기로 했어. 기억해줘")
-    page.evaluate("() => { const t=document.getElementById('chat-input').value; "
-                  "document.getElementById('chat-input').value=''; "
-                  "ashDebug.handleMessage({type:'inner_thought', interpretation:%r, decision:'act', confidence:0.92}); }" % THOUGHT)
+    emit(page, {"type": "inner_thought", "interpretation": THOUGHT, "decision": "act", "confidence": 0.92})
     emit(page, {"type": "agent_start"})
     emit(page, {"type": "tool_execution_start", "tool_call_id": "c1", "tool_name": "bash", "args": {"command": "echo done"}})
     page.wait_for_timeout(300)
@@ -67,4 +65,12 @@ with sync_playwright() as pw:
     emit(page, {"type": "approval_request", "id": "a1", "command": "echo hello", "reason": "bash 는 실행 전 승인이 필요합니다.", "always_pattern": "echo hello"})
     page.wait_for_timeout(300)
     shot(page, "hud_approval")
+
+    # 팀 에이전트 관계 그래프(FLOW). 데모 백엔드는 examples/team 의 scribe 를 싣는다
+    emit(page, {"type": "approval_resolved", "id": "a1"})
+    page.reload()
+    page.wait_for_function("() => !document.getElementById('chat-input').disabled", timeout=30000)
+    page.get_by_text("FLOW", exact=True).click()
+    page.wait_for_timeout(1500)
+    shot(page, "hud_flow")
     browser.close()

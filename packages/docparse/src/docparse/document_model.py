@@ -48,6 +48,18 @@ class Table(BaseModel):
     name: str = ""
 
 
+class FormField(BaseModel):
+    """PDF 의 AcroForm 필드 하나. id 는 `f:<이름>`, kind 는 text, checkbox, choice, other. page 는 1부터(모르면 0)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    value: str
+    kind: str = "text"
+    page: int = 0
+
+
 class Document(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -55,10 +67,11 @@ class Document(BaseModel):
     format: str
     paragraphs: tuple[Paragraph, ...] = ()
     tables: tuple[Table, ...] = ()
+    fields: tuple[FormField, ...] = ()
     meta: dict[str, str] = Field(default_factory=dict)
 
     def texts(self) -> dict[str, str]:
-        """치환 대상이 될 수 있는 id 마다 지금 텍스트. 본문 문단, 셀, 셀 안 문단."""
+        """치환 대상이 될 수 있는 id 마다 지금 텍스트. 본문 문단, 셀, 셀 안 문단. 폼 필드는 채우기로만 바꾼다."""
         out: dict[str, str] = {p.id: p.text for p in self.paragraphs}
         for table in self.tables:
             for cell in table.cells:
@@ -78,3 +91,7 @@ def table_id(index: int) -> str:
 
 def cell_id(table_index: int, row: int, col: int) -> str:
     return f"t{table_index}r{row}c{col}"
+
+
+def form_field_id(name: str) -> str:
+    return f"f:{name}"

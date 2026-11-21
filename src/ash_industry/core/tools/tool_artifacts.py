@@ -1,4 +1,4 @@
-"""[core] 도구 결과 글에서 결과물 파일(영상, 음악, 이미지)을 찾아 Artifact 로 만드는 순수 규칙."""
+"""[core] 도구 결과 글에서 결과물 파일(영상, 음악, 이미지, 문서 렌더)을 찾아 Artifact 로 만드는 순수 규칙."""
 
 import json
 from typing import Any, Literal
@@ -12,6 +12,10 @@ IMAGE = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 # 결과 JSON 에서 파일 경로가 드는 키. 미디어 워커의 잡 결과(output, video, audio)와 스템(stems 값)
 PATH_KEYS = ("output", "video", "audio", "clip", "image")
 MAX_ARTIFACTS = 6
+# docs 서버 render_document 의 결과. 렌더 파일은 문서 폴더의 .render/ 아래에만 생긴다
+RENDER_PREFIX = ".render/"
+DOCUMENT_PAGES = (".png", ".pdf")
+MAX_PAGES = 60
 
 
 Kind = Literal["video", "audio", "image"]
@@ -67,3 +71,28 @@ def artifacts_from_result(text: str, store: str = "creative") -> list[Artifact]:
         if len(out) >= MAX_ARTIFACTS:
             break
     return out
+
+
+def _render_file(path: Any) -> bool:
+    if not isinstance(path, str) or not path.startswith(RENDER_PREFIX) or ".." in PurePosixPath(path).parts:
+        return False
+    return PurePosixPath(path).suffix.lower() in DOCUMENT_PAGES
+
+
+def document_artifacts(text: str) -> list[Artifact]:
+    """render_document 의 png, pdf 결과를 문서 하나로. 쪽은 받은 순서 그대로, html 과 오류는 빈 목록. 순수 함수."""
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, dict) or data.get("format") not in ("png", "pdf"):
+        return []
+    files = data.get("files")
+    if not isinstance(files, list):
+        return []
+    pages = [f for f in files if _render_file(f)][:MAX_PAGES]
+    if not pages:
+        return []
+    source = data.get("path")
+    title = PurePosixPath(source).name if isinstance(source, str) and source else PurePosixPath(pages[0]).name
+    return [Artifact(kind="document", path=pages[0], title=title, store="docs", pages=pages)]

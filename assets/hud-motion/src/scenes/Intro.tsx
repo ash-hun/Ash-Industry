@@ -19,18 +19,18 @@ export const Intro: React.FC = () => {
         <OffthreadVideo src={staticFile("hud_full.mp4")} startFrom={Math.round(INTRO_VIDEO_FROM_SEC * fps)} muted
           style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </AbsoluteFill>
-      <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(5,8,15,0.35), rgba(5,8,15,0.75))" }} />
+      <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(20,22,26,0.35), rgba(20,22,26,0.78))" }} />
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", gap: 22 }}>
         <div style={{ fontFamily: theme.fonts.mono, fontSize: 64, fontWeight: 600, letterSpacing: "0.32em",
           color: theme.colors.primary, opacity: mark,
           transform: `scale(${interpolate(mark, [0, 1], [0.9, 1])}) translateY(${interpolate(mark, [0, 1], [24, 0])}px)`,
           textShadow: `0 0 ${40 * glowPulse}px ${theme.colors.glow}` }}>{WORDMARK}</div>
-        <WordReveal text="먼저 말을 거는 개인 AI 비서" hero="먼저" delay={10} per={3}
+        <WordReveal text="여러 AI 에이전트를 한곳에서 운영한다" hero="한곳에서" delay={10} per={3}
           style={{ fontFamily: theme.fonts.display, fontSize: 40, fontWeight: 700, color: theme.colors.text,
             letterSpacing: "-0.02em", justifyContent: "center" }} />
         <Entrance delay={26} from={14}>
           <div style={{ fontFamily: theme.fonts.mono, fontSize: 15, letterSpacing: "0.34em",
-            color: theme.colors.textDim, textTransform: "uppercase" }}>Web HUD</div>
+            color: theme.colors.textDim, textTransform: "uppercase" }}>Ash Industry · Web HUD</div>
         </Entrance>
       </AbsoluteFill>
     </SceneExit>

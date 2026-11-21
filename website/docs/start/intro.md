@@ -10,7 +10,7 @@ Ash Industry 는 여러 AI 에이전트를 한 곳에서 띄우고 운영하는 
 
 소스는 공개하지만 OSI 오픈소스는 아니다. PolyForm Noncommercial 1.0.0 에 기계학습 학습 데이터 사용 금지 조항을 더한 라이선스이고, 전문은 저장소의 `LICENSE` 에 있다.
 
-![Web HUD 화면. Inner Thought, 마크다운 응답, Proactive Dialogue, 승인 기억이 차례로 보인다](/img/hud-motion.gif)
+![Web HUD 화면. 팀 에이전트 그래프, 도구 실행과 응답, 먼저 건네는 말, 실행 전 승인이 차례로 보인다](/img/hud-motion.gif)
 
 ## 서비스 개요
 

@@ -16,6 +16,7 @@ from ash_industry.ui.web.router.session_router import build_session_router
 from ash_industry.ui.web.router.agenda_router import build_agenda_router
 from ash_industry.ui.web.router.agent_router import build_agent_router
 from ash_industry.ui.web.router.voice_router import build_voice_router
+from ash_industry.ui.web.router.docs_router import build_docs_router
 from ash_industry.ui.web.router.push_router import build_push_router
 from ash_industry.ui.web.router.tool_router import build_tool_router
 from ash_industry.ui.web.router.mcp_router import build_mcp_router
@@ -73,6 +74,7 @@ def create_app(
     app.include_router(build_brand_router(state))
     app.include_router(build_voice_router(state))
     app.include_router(build_creative_router(state))
+    app.include_router(build_docs_router(state))
     app.include_router(build_workflow_router(state))
     app.include_router(build_mcp_router(state))
     app.include_router(build_platform_router(state))

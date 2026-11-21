@@ -1,10 +1,12 @@
-"""[ui] Workflow 화면 REST: 에이전트 관계 그래프(에이전트, sub-agent, 최근 위임)와 백그라운드 작업 현황."""
+"""[ui] Workflow 화면 REST: 에이전트 관계 그래프(에이전트, sub-agent, 최근 위임), 노드 배치, 백그라운드 작업 현황."""
 
+import asyncio
 from typing import Any
 from datetime import datetime
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
+from ash_industry.core.workflow.workflow_layout_store import WorkflowLayout, WorkflowLayoutStore
 from ash_industry.core.workflow.workflow_tracker import SUBAGENT_PREFIX
 from ash_industry.ui.web.router.tool_router import short_description
 from ash_industry.core.workflow.workflow_types import JobRecord
@@ -25,6 +27,7 @@ WORKFLOW_EXAMPLE = {
                "label": "오늘 일정 정리", "started_ms": 1791613276663, "ended_ms": 1791613279001, "ok": True,
                "session_id": "default", "tokens": 59012}],
 }
+LAYOUT_EXAMPLE = {"nodes": {"agent:main": {"x": 480.0, "y": 210.0}, "leaf:main:bash": {"x": 370.0, "y": 180.0}}}
 JOBS_EXAMPLE = {
     "jobs": [{"job_id": "schedule:morning", "kind": "schedule", "label": "아침 브리핑", "runs": 3, "running": False,
               "last_started_ms": 1791613276663, "last_ended_ms": 1791613281000, "last_ok": True, "last_error": "",
@@ -79,6 +82,7 @@ def build_workflow_router(state: WebState) -> APIRouter:
     agents = state.assembly.agents
 
     needs_approval = set(state.settings.security.require_approval_for)
+    layouts = WorkflowLayoutStore(state.settings.workflow.layout_path)
 
     def capabilities() -> list[dict[str, Any]]:
         # 에이전트마다 세션이 실제로 쓰는 도구(정의의 tools, never 를 거른 것). 세션을 열지 않고 레지스트리만 만든다
@@ -146,6 +150,32 @@ def build_workflow_router(state: WebState) -> APIRouter:
             "session_id": session_id, "agent": profile.agent_id, "name": profile.name, "model": profile.model.model,
             "context_tokens": context_tokens(messages),
         }
+
+    @router.get(
+        "/api/workflow/layout",
+        summary="그래프 노드 배치",
+        description=(
+            "사용자가 옮기거나 정렬이 정한 노드 자리. 키는 agent:<id>, leaf:<에이전트>:<이름>, shared:<이름>."
+            " 설치 하나에 하나라 어느 기기에서 열어도 같다. 저장한 적 없으면 nodes 가 비어 있고 기본 배치로 그린다."
+        ),
+        responses={200: {"content": {"application/json": {"example": LAYOUT_EXAMPLE}}}},
+    )
+    async def get_layout() -> JSONResponse:
+        layout = await asyncio.to_thread(layouts.load)
+        return JSONResponse(layout.model_dump(mode="json"))
+
+    @router.put(
+        "/api/workflow/layout",
+        summary="그래프 노드 배치 저장",
+        description=(
+            "nodes 전체를 바꾼다(합치지 않는다). 빈 nodes 는 기본 배치로 되돌린다. 노드 2000개, 키 200자,"
+            " 좌표 ±100000 을 넘거나 수가 아니면 422. 같은 본문을 다시 보내면 같은 파일이 남는다."
+        ),
+        responses={200: {"content": {"application/json": {"example": LAYOUT_EXAMPLE}}}},
+    )
+    async def put_layout(body: WorkflowLayout) -> JSONResponse:
+        saved = await asyncio.to_thread(layouts.save, body)
+        return JSONResponse(saved.model_dump(mode="json"))
 
     @router.get(
         "/api/jobs",

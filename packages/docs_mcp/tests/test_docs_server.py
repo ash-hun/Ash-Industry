@@ -1,8 +1,11 @@
 import pytest
 from pathlib import Path
+from pypdf import PdfWriter
 from hwpx import HwpxDocument
 from openpyxl import Workbook
+from pptx import Presentation
 from docx import Document as new_docx
+from pypdf.generic import NameObject, ArrayObject, FloatObject, TextStringObject, DictionaryObject
 
 from docs_mcp.docs_server import DocsService, build_server
 from docs_mcp.docs_paths import DocsPaths
@@ -201,3 +204,38 @@ def test_detect_fields_xlsx_hwpx_and_errors(service: DocsService, root: Path) ->
     assert service.detect_fields("sub/a.docx")["candidates"] == []
     for bad in ("../a.docx", ".render/b.docx", "memo.txt", "none.docx"):
         assert "error" in service.detect_fields(bad)
+
+
+def _pdf_form(path: Path) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=595, height=842)
+    field = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"), NameObject("/Subtype"): NameObject("/Widget"),
+        NameObject("/FT"): NameObject("/Tx"), NameObject("/T"): TextStringObject("성명"),
+        NameObject("/Rect"): ArrayObject([FloatObject(v) for v in (100, 700, 300, 720)]),
+    })
+    ref = writer._add_object(field)
+    page[NameObject("/Annots")] = ArrayObject([ref])
+    writer._root_object[NameObject("/AcroForm")] = DictionaryObject({NameObject("/Fields"): ArrayObject([ref])})
+    with open(path, "wb") as f:
+        writer.write(f)
+
+
+def test_pptx_and_pdf_are_listed_inspected_and_filled(service: DocsService, root: Path) -> None:
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[0]).shapes.title.text = "{{제목}}"
+    prs.save(str(root / "발표.pptx"))
+    _pdf_form(root / "신청.pdf")
+    listed = [d["path"] for d in service.list_documents()["documents"]]
+    assert listed == ["sub/a.docx", "발표.pptx", "신청.pdf"]
+    title = service.inspect_document("발표.pptx")["paragraphs"]
+    assert title == [{"id": "s0sh2p0", "text": "{{제목}}", "style": "Title 1"}]
+    pdf = service.inspect_document("신청.pdf")
+    assert pdf["fields"] == [{"id": "f:성명", "name": "성명", "kind": "text", "value": "", "page": 1}]
+    detected = service.detect_fields("신청.pdf")
+    fields = [{k: c[k] for k in ("name", "type", "required", "locator")} for c in detected["candidates"]]
+    assert service.register_template("신청.pdf", detected["template_id"], "blank_form", fields)["registered"]
+    filled = service.fill_template(detected["template_id"], {"성명": "홍길동"})
+    assert filled["verify"] == {"ok": True, "issues": []} and filled["path"].endswith(".pdf")
+    assert service.inspect_document(filled["path"])["fields"][0]["value"] == "홍길동"
+    assert service.plan_edit("신청.pdf", [{"target": "f:성명", "text": "x"}])["issues"] == ["없는 대상: f:성명"]

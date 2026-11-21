@@ -17,8 +17,10 @@ TEMPLATE_ID = r"^[0-9A-Za-z가-힣_-]{1,64}$"
 
 FieldType = Literal["text", "long_text", "date", "date_range", "number"]
 FillValue = str | int | float
-# 문단과 표가 있는 형식. table_cell, anchor_text 는 이 형식에만 쓴다
+# 문단과 표가 있는 형식. anchor_text 는 이 형식에만 쓴다
 TEXT_FORMATS = ("docx", "hwpx", "hwp")
+# table_cell 을 쓰는 형식. PPTX 표는 슬라이드를 가로질러 0부터 센다
+TABLE_FORMATS = (*TEXT_FORMATS, "pptx")
 
 
 class TemplateValueError(ValueError):
@@ -73,7 +75,29 @@ class SheetCellLocator(BaseModel):
         return value.strip().upper() if isinstance(value, str) else value
 
 
-AnyLocator = PlaceholderLocator | TableCellLocator | AnchorTextLocator | SheetCellLocator
+class ShapeTextLocator(BaseModel):
+    """PPTX 슬라이드(0부터)의 도형(shape_id) 글 전체를 값으로 바꾼다. 첫 문단 첫 run 의 서식이 남는다."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["shape_text"] = "shape_text"
+    slide: int = Field(ge=0)
+    shape: int = Field(ge=1)
+
+
+class FormFieldLocator(BaseModel):
+    """PDF AcroForm 필드 이름(전체 이름). 체크박스는 켜는 값 이름(보통 /Yes)이나 Off."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["form_field"] = "form_field"
+    name: str = Field(min_length=1, max_length=200)
+
+
+AnyLocator = (
+    PlaceholderLocator | TableCellLocator | AnchorTextLocator | SheetCellLocator | ShapeTextLocator
+    | FormFieldLocator
+)
 Locator = Annotated[AnyLocator, Field(discriminator="kind")]
 
 
@@ -94,7 +118,7 @@ class TemplateSchema(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     template_id: str = Field(pattern=TEMPLATE_ID)
-    format: Literal["docx", "xlsx", "hwpx", "hwp"]
+    format: Literal["docx", "xlsx", "hwpx", "hwp", "pptx", "pdf"]
     kind: Literal["placeholder", "blank_form"]
     source_hash: str
     fields: tuple[TemplateField, ...] = Field(min_length=1)
@@ -160,12 +184,24 @@ def check_locators(schema: TemplateSchema, document: Document) -> list[str]:
                 issues.append(f"{item.name}: sheet_cell 은 XLSX 만")
             elif not any(t.name == loc.sheet for t in document.tables):
                 issues.append(f"{item.name}: 시트가 없다 {loc.sheet}")
-        elif document.format not in TEXT_FORMATS:
-            issues.append(f"{item.name}: {loc.kind} 는 DOCX, HWPX 만")
+        elif isinstance(loc, ShapeTextLocator):
+            if document.format != "pptx":
+                issues.append(f"{item.name}: shape_text 는 PPTX 만")
+            elif not any(p.id.startswith(f"s{loc.slide}sh{loc.shape}p") for p in document.paragraphs):
+                issues.append(f"{item.name}: 글 도형이 없다 s{loc.slide}sh{loc.shape}")
+        elif isinstance(loc, FormFieldLocator):
+            if document.format != "pdf":
+                issues.append(f"{item.name}: form_field 는 PDF 만")
+            elif not any(f.name == loc.name for f in document.fields):
+                issues.append(f"{item.name}: 폼 필드가 없다 {loc.name}")
         elif isinstance(loc, TableCellLocator):
             table = next((t for t in document.tables if t.index == loc.table), None)
-            if table is None or loc.row >= table.rows or loc.col >= table.cols:
+            if document.format not in TABLE_FORMATS:
+                issues.append(f"{item.name}: table_cell 은 DOCX, HWPX, PPTX 만")
+            elif table is None or loc.row >= table.rows or loc.col >= table.cols:
                 issues.append(f"{item.name}: 표 칸이 없다 {cell_id(loc.table, loc.row, loc.col)}")
+        elif document.format not in TEXT_FORMATS:
+            issues.append(f"{item.name}: {loc.kind} 는 DOCX, HWPX 만")
         elif not any(loc.after in t for t in texts.values()):
             issues.append(f"{item.name}: 기준 글이 없다 {loc.after!r}")
     return issues

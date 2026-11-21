@@ -49,7 +49,7 @@ def test_schema_from_placeholders_rejects_unknown_hint(form_docx_path: Path) -> 
 
 
 @pytest.mark.parametrize("override", [
-    {"template_id": "../x"}, {"template_id": ".templates"}, {"template_id": "a" * 65}, {"format": "pdf"},
+    {"template_id": "../x"}, {"template_id": ".templates"}, {"template_id": "a" * 65}, {"format": "txt"},
     {"fields": []},
 ])
 def test_schema_rejects_bad_ids_and_formats(override: dict[str, object]) -> None:

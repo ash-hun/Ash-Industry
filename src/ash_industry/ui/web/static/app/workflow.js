@@ -33,7 +33,9 @@ const MARGIN = 24;           // 노드 중심이 패널 가장자리에서 이�
 const NUDGE = 8;             // 방향키 한 번에 움직이는 거리(Shift 는 세 배)
 const TIDY_ITER = 120;       // 정렬 최적화의 밀어내기 반복 상한
 const TIDY_PAD = 6;          // 정렬 때 글상자 사이에 둘 틈
-const LAYOUT_KEY = 'wf-layout-v2';  // localStorage: 이 보는 사람이 옮긴 노드 자리(v1 은 부채꼴 배치라 버린다)
+const LEGACY_LAYOUT_KEY = 'wf-layout-v2';  // 서버 저장 전에 브라우저에 남던 자리. 서버가 비어 있으면 한 번 올리고 지운다
+const LAYOUT_URL = '/api/workflow/layout';
+const LAYOUT_SAVE_MS = 600;  // 끌기와 방향키가 이어지는 동안은 마지막 자리만 보낸다
 const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
 const KIND_LABEL = { ask: '질문', subagent: 'sub-agent', orchestrate: 'orchestrate', focus: 'focus', background: '뒤에서 이어 하기' };
 // 선응답으로 닫고 뒤에서 이어 도는 턴의 받는 쪽 id(background:<에이전트>). 서버 workflow_tracker 와 같은 꼴
@@ -73,7 +75,9 @@ let _box = null;             // 공통 능력 상자 {x, y, w, h}. 없으면 nul
 let _vw = BASE_W;            // 이번 그림의 크기(viewBox 단위)
 let _vh = BASE_H;
 const _view = { k: 1, x: 0, y: 0 };  // 확대 배율과 보이는 창의 왼쪽 위(viewBox 단위)
-const _moved = loadLayout(); // 사용자가 옮기거나 정렬이 정한 자리 key → {x, y}
+const _moved = new Map();    // 사용자가 옮기거나 정렬이 정한 자리 key → {x, y}. 정본은 서버(설치 하나에 하나)
+let _layoutLoaded = false;
+let _saveTimer = null;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -212,17 +216,55 @@ function titled(node, text) {
 
 // ── 자리 ─────────────────────────────────────────────────────────────────────
 // 노드마다 키 하나(agent:<id>, leaf:<에이전트>:<이름>, shared:<이름>). 사용자가 옮기거나 정렬이 정한 자리는
-// _moved 에 남겨 다시 그려도 지킨다. 브라우저 저장소는 이 보는 사람의 편의일 뿐이라 없어도 기본 배치로 그린다
+// _moved 에 남겨 다시 그려도 지킨다. 서버(/api/workflow/layout)가 정본이고, 받지 못하면 기본 배치로 그린다
 
-function loadLayout() {
+function validEntries(obj) {
+  return Object.entries(obj || {}).filter(([, v]) => Number.isFinite(v?.x) && Number.isFinite(v?.y));
+}
+
+function takeLegacyLayout() {
   try {
-    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}');
-    return new Map(Object.entries(raw).filter(([, v]) => Number.isFinite(v?.x) && Number.isFinite(v?.y)));
-  } catch { return new Map(); }
+    const raw = localStorage.getItem(LEGACY_LAYOUT_KEY);
+    return raw ? validEntries(JSON.parse(raw)) : [];
+  } catch { return []; }
+}
+
+function dropLegacyLayout() {
+  try { localStorage.removeItem(LEGACY_LAYOUT_KEY); } catch { /* 못 지워도 서버 값이 먼저다 */ }
+}
+
+// 화면을 처음 열 때 한 번. 실패하면 다음에 열 때 다시 받는다
+async function loadLayout() {
+  if (_layoutLoaded) return;
+  const res = await apiFetch(LAYOUT_URL);
+  if (!res.ok) return;
+  const body = await res.json();
+  _layoutLoaded = true;
+  const saved = validEntries(body.nodes);
+  const legacy = takeLegacyLayout();
+  _moved.clear();
+  for (const [k, v] of saved.length ? saved : legacy) _moved.set(k, { x: v.x, y: v.y });
+  // 서버가 비어 있을 때만 브라우저에 남던 자리를 올린다. 서버에 이미 있으면 그쪽이 이긴다
+  if (!saved.length && legacy.length && !(await putLayout())) return;
+  if (legacy.length) dropLegacyLayout();
+}
+
+async function putLayout() {
+  try {
+    const res = await apiFetch(LAYOUT_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodes: Object.fromEntries(_moved) }),
+    });
+    return res.ok;
+  } catch { return false; }
 }
 
 function saveLayout() {
-  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(Object.fromEntries(_moved))); } catch { /* 저장 못 해도 그림은 그대로 */ }
+  // 서버 값을 받기 전에 보내면 다른 기기에서 저장한 배치를 덮는다
+  if (!_layoutLoaded) return;
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(putLayout, LAYOUT_SAVE_MS);
 }
 
 function clampPos(x, y) {
@@ -753,6 +795,7 @@ function queueRender() {
 }
 
 export async function loadWorkflow() {
+  try { await loadLayout(); } catch { /* 배치를 못 받아도 기본 배치로 그린다 */ }
   try {
     const [graph, jobs] = await Promise.all([
       apiFetch(`/api/workflow?session=${encodeURIComponent(currentSession())}`).then((r) => (r.ok ? r.json() : null)),

@@ -4,14 +4,14 @@ import json
 import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
-from collections.abc import AsyncIterator
+from collections.abc import Callable, AsyncIterator
 
-from ash_industry.core.tools.tool_artifacts import artifacts_from_result
+from ash_industry.core.tools.tool_artifacts import document_artifacts, artifacts_from_result
 from ash_industry.core.tools.tools_registry import AshTool
 from ash_industry.common.logger import get_logger
 
 if TYPE_CHECKING:
-    from ash_industry.model_layer.model_types import ToolResultMessage
+    from ash_industry.model_layer.model_types import Artifact, ToolResultMessage
     from ash_industry.core.tools.tools_registry import ToolRegistry
     from ash_industry.core.policy.mcp_gate import McpGate
     from ash_industry.ash_config import MCPServerConfig
@@ -19,8 +19,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# 결과물 파일을 화면이 받아 볼 수 있는 서버. 파일은 /api/creative/files/<상대 경로> 로 내준다
-ARTIFACT_SERVER = "media"
+# 결과물 파일을 화면이 받아 볼 수 있는 서버와 그 결과에서 첨부를 고르는 규칙. 미디어 워커의 파일은
+# /api/creative/files/, docs 서버의 렌더 파일은 /api/docs/files/ 로 내준다. 다른 서버의 글은 첨부하지 않는다
+ARTIFACT_RULES: "dict[str, Callable[[str], list[Artifact]]]" = {
+    "media": artifacts_from_result,
+    "docs": document_artifacts,
+}
 
 
 class MCPToolWrapper(AshTool):
@@ -51,8 +55,8 @@ class MCPToolWrapper(AshTool):
             )
             if self._gate is not None:
                 self._gate.record_result(self.name, ok=True)
-            # 미디어 워커(media)의 잡 결과에 든 파일은 화면이 플레이어로 띄운다. 다른 서버의 글은 첨부하지 않는다
-            artifacts = artifacts_from_result(result_text) if self._server.name == ARTIFACT_SERVER else []
+            rule = ARTIFACT_RULES.get(self._server.name)
+            artifacts = rule(result_text) if rule is not None else []
             return ToolResultMessage(
                 tool_call_id=tool_call_id,
                 tool_name=self.name,

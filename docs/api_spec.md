@@ -45,6 +45,8 @@
    - [GET /api/tools](#get-apitools)
    - [GET /api/voice/phrases/{name}](#get-apivoicephrasesname)
    - [GET /api/workflow](#get-apiworkflow)
+   - [GET /api/workflow/layout](#get-apiworkflowlayout)
+   - [PUT /api/workflow/layout](#put-apiworkflowlayout)
    - [GET /api/mcp/policy](#get-apimcppolicy)
    - [PUT /api/mcp/policy](#put-apimcppolicy)
    - [GET /api/mcp/audit](#get-apimcpaudit)
@@ -1703,6 +1705,43 @@ GET /api/creative/files/out/manim/circle-992298/CircleToSquare.mp4
 
 ---
 
+### GET /api/docs/files/{path}
+
+행정문서 폴더(`ASH_DOCS__DIR`, 기본 `/data/documents`. compose 가 `ASH_DOCS_DIR` 를 백엔드에 읽기 전용으로 마운트한다)의 렌더 결과. docs MCP 서버의 `render_document` 가 `.render/<이름>/` 에 만든 쪽 PNG 와 PDF 만 내준다. HUD 문서 창이 `tool_execution_end.artifacts` 의 `pages` 로 받는다.
+
+#### Endpoint
+
+```
+GET /api/docs/files/.render/출장신청서/출장신청서-1.png
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `GET` |
+| 인증 | 설정 시 필요(화면은 `apiFetch` 로 받아 blob URL 로 띄운다) |
+| 응답 Content-Type | `image/png`, `application/pdf` (404 는 `application/json`) |
+
+#### Query / Path 파라미터
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|---|---|---|---|---|
+| `path` | path | string | 예 | 문서 폴더 기준 상대 경로. `.render/` 로 시작하고 `.png`, `.pdf` 로 끝나야 한다. 원본 문서, 템플릿(`.templates/`), `..` 로 `.render/` 밖을 가리키면 404 |
+
+#### 응답 코드
+
+| 코드 | 의미 | 본문 |
+|---|---|---|
+| `200` | 파일 | 파일 본문 |
+| `404` | 없거나 `.render/` 밖이거나 png, pdf 가 아님 | `{"error": "no such render: <path>"}` |
+
+#### 특이사항
+
+**재호출**: 상태를 바꾸지 않는다. 백엔드는 문서 폴더에 쓰지 않는다(쓰기는 ash-mcp 의 docs 서버만). 같은 문서를 다시 렌더하면 같은 경로의 파일이 새 내용으로 바뀐다.
+
+---
+
 ### GET /api/voice/phrases/{name}
 
 미리 녹음한 읽기 문구 하나의 wav. 화면은 이벤트(웨이크워드, 도구 시작, Focus 전환 등)에 맞춰 합성 대신 이 파일을 재생한다.
@@ -1815,6 +1854,114 @@ $ curl -s 'http://localhost:7777/api/workflow?session=default'
 #### 특이사항
 
 **재호출**: 상태를 바꾸지 않는다. 간선은 기본(`in_memory`)이면 재시작하면 비고, `postgres` 면 `ash_workflow_edges` 에서 최근 200개를 읽어 온다(재시작 때 끝나지 않은 위임은 `ended_ms` 가 기동 시각, `ok` 가 null). sub-agent 세션 안에서 다시 맡긴 위임은 없다. `root` 는 세션 저장소를 읽으므로 메시지가 많은 세션은 그만큼 걸린다.
+
+---
+
+### GET /api/workflow/layout
+
+Workflow 그래프에서 사용자가 옮기거나 `정렬 최적화` 가 정한 노드 자리. 설치 하나에 하나라 어느 기기, 어느 창에서 열어도 같다. 화면이 처음 열릴 때 한 번 받는다.
+
+#### Endpoint
+
+```
+GET /api/workflow/layout
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `GET` |
+| 인증 | 설정 시 필요 |
+| 요청 Content-Type | 없음 (본문 없음) |
+| 응답 Content-Type | `application/json` |
+| 필수 헤더 | 없음 |
+
+#### Request Body
+
+없음.
+
+#### Query / Path 파라미터
+
+없음.
+
+#### Response Body
+
+| 필드 | 타입 | 널 허용 | 설명 |
+|---|---|---|---|
+| `nodes` | object | 아니오 | `{<노드 키>: {x, y}}`. 키는 `agent:<id>`, `leaf:<에이전트>:<이름>`, `shared:<이름>`. 좌표는 그림(viewBox) 단위. 저장한 적 없으면 `{}` |
+
+#### 상태 코드
+
+| 코드 | 의미 | 본문 |
+|---|---|---|
+| `200` | 정상 | 위 스키마 |
+
+#### 호출 예시
+
+```bash
+$ curl -s http://localhost:7777/api/workflow/layout
+{"nodes":{"agent:main":{"x":480.0,"y":210.0},"leaf:main:bash":{"x":370.0,"y":180.0}}}
+```
+
+#### 특이사항
+
+**재호출**: 상태를 바꾸지 않는다. 정본은 `ASH_WORKFLOW__LAYOUT_PATH`(기본 `~/.ash/workflow_layout.json`)다. 파일이 없거나 깨졌으면 `{"nodes": {}}` 를 돌려주고 화면은 기본 배치로 그린다.
+
+---
+
+### PUT /api/workflow/layout
+
+노드 배치 전체를 바꾼다. HUD 는 끌기, 방향키, `정렬 최적화`, `원래대로` 뒤 0.6초 동안 더 바뀌지 않으면 그때의 배치를 보낸다.
+
+#### Endpoint
+
+```
+PUT /api/workflow/layout
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `PUT` |
+| 인증 | 설정 시 필요 |
+| 요청 Content-Type | `application/json` |
+| 응답 Content-Type | `application/json` |
+| 필수 헤더 | 없음 |
+
+#### Request Body
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `nodes` | object | 아니오 | `{<노드 키>: {x, y}}`. 노드 2000개 이하, 키는 제어 문자 없이 1~200자, `x`, `y` 는 ±100000 안의 유한한 수. 다른 필드는 받지 않는다. 비우면(`{}`) 기본 배치로 돌아간다 |
+
+#### Query / Path 파라미터
+
+없음.
+
+#### Response Body
+
+저장한 배치. [GET /api/workflow/layout](#get-apiworkflowlayout) 과 같다.
+
+#### 상태 코드
+
+| 코드 | 의미 | 본문 |
+|---|---|---|
+| `200` | 저장함 | 위 스키마 |
+| `422` | 본문 검증 실패(범위 밖 좌표, 긴 키, 노드 수 초과, 모르는 필드) | FastAPI 검증 오류 |
+
+#### 호출 예시
+
+```bash
+$ curl -s -X PUT http://localhost:7777/api/workflow/layout -H 'Content-Type: application/json' \
+    -d '{"nodes":{"agent:main":{"x":480,"y":210}}}'
+{"nodes":{"agent:main":{"x":480.0,"y":210.0}}}
+```
+
+#### 특이사항
+
+**재호출**: 합치지 않고 통째로 바꾼다. 같은 본문을 다시 보내면 같은 응답과 같은 파일이 남는다(키를 정렬해 쓴다). 쓰기는 임시 파일 뒤 교체라 중간에 죽어도 앞 배치가 남는다. 두 창이 동시에 보내면 나중에 닿은 것이 이긴다.
 
 ---
 
@@ -2154,7 +2301,7 @@ GET /ws?session_id=<id>&agent=<agent_id>&token=<key>   (Upgrade: websocket)
 | `message_update` | `text_delta`, `thinking_delta`, `timestamp` | 스트리밍 조각 |
 | `stream_delta` | `text` | 슬래시 명령 결과 등 비스트림 텍스트 |
 | `tool_execution_start` | `tool_call_id`, `tool_name`, `args`(object), `timestamp` | 도구 실행 시작 |
-| `tool_execution_end` | `tool_call_id`, `tool_name`, `is_error`, `artifacts[]`, `timestamp` | 도구 실행 끝. `artifacts` 는 도구가 만든 결과물 `{kind: video\|audio\|image\|file, path, title, store}`. 지금은 MCP 서버 `media` 의 결과 JSON(`output`, `video`, `audio`, `stems` 값)에서 모은다. HUD 는 첫 영상(없으면 음악, 이미지)을 플레이어 모달로 띄우고 파일은 `GET /api/creative/files/{path}` 로 받는다 |
+| `tool_execution_end` | `tool_call_id`, `tool_name`, `is_error`, `artifacts[]`, `timestamp` | 도구 실행 끝. `artifacts` 는 도구가 만든 결과물 `{kind: video\|audio\|image\|file\|document, path, title, store, pages[]}`. MCP 서버 `media` 의 결과 JSON(`output`, `video`, `audio`, `stems` 값)에서 모으고(`store: creative`), 서버 `docs` 의 `render_document` png, pdf 결과는 문서 하나(`kind: document`, `store: docs`, `title` 은 원본 파일 이름, `pages` 는 `.render/` 아래 쪽 그림이나 PDF, 60개까지)로 만든다. HUD 는 문서, 영상, 음악, 이미지 순으로 하나를 모달로 띄우고 파일은 `GET /api/creative/files/{path}` 나 `GET /api/docs/files/{path}` 로 받는다 |
 | `agent_end` | `session_id`, `final_message`, `turns`, `agent_name`, `timestamp`, `continues?` | 루프 끝. `final_message` 는 마지막 assistant 메시지(`role`, `content[]`, `provider`, `model`, `usage{input, output, cache_read, cache_write}`, `stop_reason`, `error_message`, `timestamp`)이고 null 일 수 있다. 루트면 입력을 다시 받는다. `continues: true` 는 `/focus` 안내 뒤 메인 에이전트가 이어 돈다는 뜻이라, 화면은 입력 잠금과 음성 요청 표시를 그대로 둔다 |
 | `agent_error` | `message`, `code`, `timestamp` | 모델 스트림이 오류를 냈다. `code` 는 지금 늘 null |
 | `inner_thought` | `session_id`, `interpretation`, `decision`(기본 `silent`), `confidence`(0~1), `frame`(사고 프레임 전체), `timestamp` | 요청 시점과 성찰 시점의 사고 1회 |

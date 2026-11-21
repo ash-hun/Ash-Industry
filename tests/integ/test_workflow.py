@@ -95,3 +95,25 @@ def test_job_runs_continue_across_a_restart(monkeypatch, tmp_path):
 
     assert (restored["runs"], restored["running"], restored["last_ok"]) == (1, False, True)
     assert again["runs"] == 2
+
+
+def test_layout_put_then_get_survives_restart_and_rejects_bad_body(monkeypatch, tmp_path):
+    env = {"WORKFLOW__LAYOUT_PATH": str(tmp_path / "layout.json")}
+    body = {"nodes": {"agent:main": {"x": 480.0, "y": 210.0}, "leaf:main:bash": {"x": 370.5, "y": 180.0}}}
+
+    with web_client(web_assembly(monkeypatch, tmp_path, **env)) as client:
+        empty = client.get("/api/workflow/layout").json()
+        first = client.put("/api/workflow/layout", json=body)
+        again = client.put("/api/workflow/layout", json=body)
+        bad = client.put("/api/workflow/layout", json={"nodes": {"agent:main": {"x": 1e9, "y": 0}}})
+
+    assert empty == {"nodes": {}}
+    assert first.status_code == again.status_code == 200 and first.json() == again.json() == body
+    assert bad.status_code == 422
+
+    with web_client(web_assembly(monkeypatch, tmp_path, **env)) as client:
+        restored = client.get("/api/workflow/layout").json()
+        reset = client.put("/api/workflow/layout", json={"nodes": {}}).json()
+
+    assert restored == body
+    assert reset == {"nodes": {}}

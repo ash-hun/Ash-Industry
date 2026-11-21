@@ -21,31 +21,31 @@ const OVERLAP = sec(0.25);  // 앞 장면의 퇴장과 다음 장면의 등장�
 
 const FEATURES: FeatureProps[] = [
   {
-    kicker: "01 · Request",
-    title: "묻기 전에 먼저 생각한다",
-    hero: "생각한다",
-    lines: ["💭 내적 사고 한 줄이 응답 앞에", "도구 실행은 흔적으로 남는다", "승인 없이 돌아가는 건 읽기뿐"],
-    shot: "hud_tool.png", focus: "100% 88%", zoomFrom: 1.5, zoomTo: 1.6,
+    kicker: "01 · Team",
+    title: "에이전트를 팀으로 묶는다",
+    hero: "팀으로",
+    lines: ["yaml 한 파일이 에이전트 하나", "ask_agent 로 일을 맡긴다", "도구와 위임이 그래프로 보인다"],
+    shot: "hud_flow.png", focus: "0% 50%", zoomFrom: 1.45, zoomTo: 1.55,
   },
   {
     kicker: "02 · Answer",
-    title: "응답은 마크다운, 비용은 숫자로",
-    hero: "숫자로",
-    lines: ["목록·코드블록·강조 그대로", "토큰과 비용이 턴마다 쌓인다", "큰 코드블록은 패널로 빠진다"],
-    shot: "hud_answer.png", focus: "100% 62%", zoomFrom: 1.6, zoomTo: 1.5,
+    title: "생각하고, 도구를 쓰고 답한다",
+    hero: "도구를",
+    lines: ["Inner Thought 가 응답 앞에", "도구 실행은 흔적으로 남는다", "응답은 마크다운 그대로"],
+    shot: "hud_answer.png", focus: "100% 40%", zoomFrom: 1.6, zoomTo: 1.5,
   },
   {
     kicker: "03 · Proactive",
     title: "열린 약속을 보고 먼저 말을 건다",
     hero: "먼저",
-    lines: ["성찰 데몬이 2분마다 돌아본다", "🔔 도움이 됐나요? 네 / 아니오", "답이 임계치를 학습한다"],
-    shot: "hud_proactive.png", focus: "100% 96%", zoomFrom: 1.5, zoomTo: 1.6,
+    lines: ["성찰 daemon 이 돌아본다", "약속은 open loop 로 남는다", "수락과 거절로 임계치를 배운다"],
+    shot: "hud_proactive.png", focus: "100% 58%", zoomFrom: 1.5, zoomTo: 1.6,
   },
   {
     kicker: "04 · Approval",
     title: "위험한 건 묻고, 한 번 답하면 기억한다",
     hero: "기억한다",
-    lines: ["bash 는 실행 전 승인", "ALWAYS 한 번이면 다음엔 통과", "규칙은 approvals.yaml 에"],
+    lines: ["bash 는 실행 전 승인", "ALWAYS 한 번이면 다음엔 통과", "규칙은 에이전트별 yaml 에"],
     shot: "hud_approval.png", focus: "50% 50%", zoomFrom: 1.22, zoomTo: 1.3,
   },
 ];

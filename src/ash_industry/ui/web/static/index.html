@@ -355,7 +355,7 @@
   </div>
 </div>
 
-<!-- MEDIA PLAYER MODAL: 도구가 만든 영상, 음악 결과물 -->
+<!-- MEDIA PLAYER MODAL: 도구가 만든 영상, 음악 결과물과 문서 렌더(쪽 그림, PDF) -->
 <div class="media-overlay hidden" id="media-overlay" role="dialog" aria-modal="true" aria-labelledby="media-title">
   <div class="media-box">
     <div class="media-head">
@@ -367,6 +367,11 @@
       </span>
     </div>
     <div class="media-stage" id="media-stage"></div>
+    <div class="media-pager hidden" id="media-pager">
+      <button class="art-btn" id="media-prev" type="button" aria-label="이전 쪽">‹</button>
+      <span id="media-page">1 / 1</span>
+      <button class="art-btn" id="media-next" type="button" aria-label="다음 쪽">›</button>
+    </div>
     <p class="media-path" id="media-path"></p>
   </div>
 </div>

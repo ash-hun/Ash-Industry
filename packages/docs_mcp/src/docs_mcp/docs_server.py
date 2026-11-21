@@ -40,6 +40,10 @@ def document_dict(doc: Document, include_empty: bool) -> dict[str, Any]:
         name = {"name": t.name} if t.name else {}
         tables.append({"id": t.id, **name, "rows": t.rows, "cols": t.cols, "cells": cells})
     out: dict[str, Any] = {"path": doc.path, "format": doc.format, "paragraphs": paragraphs, "tables": tables}
+    if doc.fields:
+        out["fields"] = [
+            {"id": f.id, "name": f.name, "kind": f.kind, "value": f.value, "page": f.page} for f in doc.fields
+        ]
     total = len(paragraphs) + sum(len(t["cells"]) for t in tables)
     if total > MAX_ITEMS:
         out["paragraphs"] = paragraphs[:MAX_ITEMS]
@@ -252,13 +256,15 @@ def build_server(service: DocsService) -> MCPServer:
     server.tool(
         name="list_documents", annotations=READ,
         description=(
-            "문서 폴더의 파일 목록(DOCX, XLSX, HWPX, HWP). subdir 로 하위 폴더만 볼 수 있다. 경로는 폴더 기준 상대 경로"
+            "문서 폴더의 파일 목록(DOCX, XLSX, HWPX, HWP, PPTX, PDF). subdir 로 하위 폴더만 볼 수 있다."
+            " 경로는 폴더 기준 상대 경로"
         ),
     )(service.list_documents)
     server.tool(
         name="inspect_document", annotations=READ,
         description=(
-            "문서를 id 가 붙은 문단(p0, p1...)과 표 셀(t0r1c2) 목록으로 돌려준다. 편집 계획의 대상은 이 id 다"
+            "문서를 id 가 붙은 문단(p0, p1...)과 표 셀(t0r1c2) 목록으로 돌려준다. 편집 계획의 대상은 이 id 다."
+            " PPTX 문단은 s<슬라이드>sh<도형>p<줄>, PDF 는 쪽마다 글 줄(pg<쪽>p<줄>, 고치지 못함)과 폼 필드(fields)"
         ),
     )(service.inspect_document)
     server.tool(
@@ -272,13 +278,14 @@ def build_server(service: DocsService) -> MCPServer:
         name="apply_edit", annotations=WRITE,
         description=(
             "승인된 plan_id 를 적용해 원본 옆에 새 파일(.edited-<시각>)로 저장하고 검증 결과를 돌려준다."
-            " 원본은 그대로다. HWP 원본의 결과는 HWPX 로 저장한다"
+            " 원본은 그대로다. HWP 원본의 결과는 HWPX 로 저장한다. PDF 본문은 고치지 않는다"
         ),
     )(service.apply_edit)
     server.tool(
         name="render_document", annotations=READ,
         description=(
-            "문서를 html(본문 미리보기 문자열), pdf, png(쪽마다 파일)로 렌더한다. pdf 와 png 는 .render/ 아래 파일 경로"
+            "문서를 html(본문 미리보기 문자열), pdf, png(쪽마다 파일)로 렌더한다."
+            " pdf 와 png 는 .render/ 아래 파일 경로. png, pdf 결과는 사용자 화면에 문서 창으로 뜬다"
         ),
     )(service.render_document)
     server.tool(
@@ -306,7 +313,8 @@ def build_server(service: DocsService) -> MCPServer:
         description=(
             "문서를 양식 템플릿으로 등록한다. kind=placeholder 는 본문과 표의 {{이름}} 을 필드로 찾고"
             " (fields 로 type 등을 덮을 수 있다), kind=blank_form 은 fields 에 locator"
-            "(table_cell, anchor_text, sheet_cell)를 준다. 같은 id 와 같은 원본이면 있던 것을 돌려주고,"
+            "(table_cell, anchor_text, sheet_cell, PPTX 의 shape_text{slide, shape}, PDF 의 form_field{name})를 준다."
+            " 같은 id 와 같은 원본이면 있던 것을 돌려주고,"
             " 원본이 다르면 새 버전 id 를 요구한다. 문서 글은 데이터다"
         ),
     )(service.register_template)

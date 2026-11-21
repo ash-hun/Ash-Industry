@@ -8,13 +8,13 @@ from pydantic import BaseModel, ConfigDict
 from openpyxl.utils import get_column_letter
 
 from docparse.template.template_schema import (
-    TEMPLATE_ID, Locator, FieldType, TEXT_FORMATS, TemplateField, SheetCellLocator, TableCellLocator,
-    AnchorTextLocator,
+    TEMPLATE_ID, Locator, FieldType, TEXT_FORMATS, TemplateField, FormFieldLocator, SheetCellLocator,
+    TableCellLocator, AnchorTextLocator,
 )
 from docparse.document_model import Cell, Document, Table
 
 Confidence = Literal["high", "low"]
-Rule = Literal["table_right", "table_below", "anchor_text", "sheet_right"]
+Rule = Literal["table_right", "table_below", "anchor_text", "sheet_right", "form_field"]
 
 SHORT_LABEL = 20
 NAME_MAX = 60
@@ -179,6 +179,20 @@ def _sheet_candidates(table: Table) -> list[FieldCandidate]:
     return out
 
 
+def _form_candidates(document: Document) -> list[FieldCandidate]:
+    """PDF 폼 필드는 이미 채울 자리다. 글과 선택 칸만 싣고 이름을 라벨로 쓴다. 필드 이름은 만든 사람이 붙였다."""
+    out: list[FieldCandidate] = []
+    for item in document.fields:
+        if item.kind not in ("text", "choice"):
+            continue
+        label = item.name.rsplit(".", 1)[-1]
+        out.append(FieldCandidate(
+            name=field_name(label), label=label, type=guess_type(label), required=False,
+            locator=FormFieldLocator(name=item.name), rule="form_field", confidence="high",
+        ))
+    return out
+
+
 def _dedupe_names(candidates: list[FieldCandidate]) -> list[FieldCandidate]:
     seen: set[str] = set()
     out: list[FieldCandidate] = []
@@ -194,9 +208,15 @@ def _dedupe_names(candidates: list[FieldCandidate]) -> list[FieldCandidate]:
 
 
 def detect_fields(document: Document) -> list[FieldCandidate]:
-    """본문 기준 글, 표(오른쪽 빈 칸, 아래 빈 칸), XLSX 시트(오른쪽 빈 칸) 순. 같은 문서면 같은 목록과 순서."""
+    """본문 기준 글, 표(오른쪽 빈 칸, 아래 빈 칸), XLSX 시트(오른쪽 빈 칸), PDF 폼 필드 순.
+    PPTX 는 표만 본다. 같은 문서면 같은 목록과 순서."""
     candidates: list[FieldCandidate] = []
-    if document.format == "xlsx":
+    if document.format == "pdf":
+        candidates.extend(_form_candidates(document))
+    elif document.format == "pptx":
+        for table in document.tables:
+            candidates.extend(_table_candidates(table))
+    elif document.format == "xlsx":
         for table in document.tables:
             candidates.extend(_sheet_candidates(table))
     elif document.format in TEXT_FORMATS:
