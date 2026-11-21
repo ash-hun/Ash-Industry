@@ -1,8 +1,13 @@
-"""[service] 편집 결과 검증. 다시 읽은 구조를 계획과 대조한다. 순수 함수."""
+"""[service] 편집과 양식 채우기 결과 검증. 다시 읽은 구조를 계획이나 값과 대조한다. 순수 함수."""
 
+from typing import Any
+from collections.abc import Mapping
 from pydantic import BaseModel, ConfigDict
 
-from docparse.document_model import Document
+from docparse.template.template_schema import (
+    TableCellLocator, TemplateSchema, SheetCellLocator, PlaceholderLocator, render_value, validate_values,
+)
+from docparse.document_model import Document, cell_id
 from docparse.edit_plan import EditPlan
 
 PLACEHOLDER = "{{"
@@ -42,4 +47,43 @@ def verify_edit(before: Document, after: Document, plan: EditPlan) -> VerifyResu
     leftover = sorted(i for i, t in new.items() if PLACEHOLDER in t)
     if leftover:
         issues.append(f"자리표시자가 남음: {', '.join(leftover[:5])}")
+    return VerifyResult(ok=not issues, issues=tuple(issues), changed=tuple(changed))
+
+
+def _sheet_text(after: Document, sheet: str, address: str) -> str:
+    table = next((t for t in after.tables if t.name == sheet), None)
+    if table is None:
+        return ""
+    return next((c.text for c in table.cells if c.address == address), "")
+
+
+def verify_fill(after: Document, schema: TemplateSchema, values: Mapping[str, Any]) -> VerifyResult:
+    """검사: 값이 스키마에 맞는가, 필드의 {{이름}} 이 남지 않았는가, 채운 값이 제자리에 있는가."""
+    issues = validate_values(schema, values)
+    if issues:
+        return VerifyResult(ok=False, issues=tuple(issues))
+    texts = after.texts()
+    changed: list[str] = []
+    for item in schema.fields:
+        loc = item.locator
+        expected = render_value(item, values.get(item.name))
+        if isinstance(loc, PlaceholderLocator):
+            left = sorted(i for i, t in texts.items() if loc.token in t)
+            if left:
+                issues.append(f"자리표시자가 남음: {loc.token} ({', '.join(left[:5])})")
+                continue
+        if not expected:
+            continue
+        if isinstance(loc, TableCellLocator):
+            cid = cell_id(loc.table, loc.row, loc.col)
+            found = texts.get(cid) == expected
+        elif isinstance(loc, SheetCellLocator):
+            found = _sheet_text(after, loc.sheet, loc.cell) == expected
+        else:
+            # 자리표시자와 기준 글 뒤는 문단 일부라 값이 들어 있는지만 본다
+            found = any(expected in t for t in texts.values())
+        if found:
+            changed.append(item.name)
+        else:
+            issues.append(f"값이 제자리에 없음: {item.name}")
     return VerifyResult(ok=not issues, issues=tuple(issues), changed=tuple(changed))

@@ -1,8 +1,10 @@
 """[service] 확장자로 어댑터를 고르는 입구. 에이전트 쪽은 이 함수들만 부른다."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+from collections.abc import Mapping
 
+from docparse.template.template_schema import TemplateSchema, TemplateValueError, validate_values, build_assignments
 from docparse.render.render_service import LibreOfficeRenderer
 from docparse.adapters.docx_adapter import DocxAdapter
 from docparse.adapters.xlsx_adapter import XlsxAdapter
@@ -35,6 +37,16 @@ def inspect(path: Path) -> Document:
 def apply(path: Path, plan: EditPlan, out_path: Path) -> Document:
     """원본은 두고 out_path 에 저장한다. 같은 계획을 같은 원본에 다시 적용하면 같은 결과다."""
     return adapter_for(path).replace(path, plan, out_path)
+
+
+def fill(path: Path, schema: TemplateSchema, values: Mapping[str, Any], out_path: Path) -> Document:
+    """값을 검사하고 로케이터마다 넣어 out_path 에 저장한다. 원본은 두고, 같은 값이면 같은 결과."""
+    if path.suffix.lower() != f".{schema.format}":
+        raise UnsupportedFormat(f"템플릿은 {schema.format} 인데 파일은 {path.suffix or '(확장자 없음)'}")
+    issues = validate_values(schema, values)
+    if issues:
+        raise TemplateValueError(issues)
+    return adapter_for(path).fill(path, build_assignments(schema, values), out_path)
 
 
 def to_html(path: Path) -> str:

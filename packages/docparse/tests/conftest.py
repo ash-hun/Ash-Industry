@@ -42,3 +42,39 @@ def xlsx_path(tmp_path: Path) -> Path:
     path = tmp_path / "경비.xlsx"
     wb.save(str(path))
     return path
+
+
+@pytest.fixture
+def form_docx_path(tmp_path: Path) -> Path:
+    """채우기용 양식. 자리표시자 하나는 run 셋에 걸쳐 있다."""
+    doc = new_docx()
+    para = doc.add_paragraph()
+    para.add_run("신청자: ").bold = True
+    para.add_run("{{이").italic = True
+    para.add_run("름}}")
+    para.add_run(" 님")
+    doc.add_paragraph("소속: 미정")
+    doc.add_paragraph("출장 목적")
+    doc.add_paragraph("")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "기간"
+    table.cell(0, 1).text = "{{기간}}"
+    table.cell(1, 0).text = "금액"
+    path = tmp_path / "양식.docx"
+    doc.save(str(path))
+    return path
+
+
+@pytest.fixture
+def form_xlsx_path(tmp_path: Path) -> Path:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "신청"
+    ws["A1"] = "이름"
+    ws["B1"] = "{{이름}}"
+    ws["A2"] = "금액"
+    ws["A3"] = "{{인원}}"
+    ws["C1"] = "비고: {{비고}}"
+    path = tmp_path / "양식.xlsx"
+    wb.save(str(path))
+    return path

@@ -1,11 +1,14 @@
-"""[service] XLSX 어댑터. openpyxl 로 시트를 표로 읽고 셀 값을 바꾸며 HTML 표로 미리보기를 만든다."""
+"""[service] XLSX 어댑터. openpyxl 로 시트를 표로 읽고 셀 값을 바꾸거나 채우며 HTML 표로 미리보기를 만든다."""
 
 import re
 import html
 from typing import Any
 from pathlib import Path
 from openpyxl import load_workbook
+from collections.abc import Mapping
+from openpyxl.cell.cell import MergedCell
 
+from docparse.template.template_schema import AnyLocator, FillValue, SheetCellLocator, PlaceholderLocator
 from docparse.document_model import Cell, Document, Table, cell_id, table_id
 from docparse.edit_plan import EditPlan
 
@@ -20,6 +23,29 @@ def _as_value(original: Any, text: str) -> Any:
         return int(text) if re.fullmatch(r"-?\d+", text.strip()) else float(text)
     except ValueError:
         return text
+
+
+def _set_value(cell: Any, value: FillValue) -> None:
+    cell.value = value
+    if isinstance(value, str) and value.startswith("="):
+        # 사용자가 준 값이 수식으로 저장되면 열 때 실행된다. 글로 둔다
+        cell.data_type = "s"
+
+
+def _replace_token(wb: Any, token: str, value: FillValue) -> int:
+    """글 칸의 token 을 바꾼 칸 수. 칸 전체가 token 하나이고 값이 숫자면 숫자로 둔다. 수식 칸은 건드리지 않는다."""
+    count = 0
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.data_type != "s" or not isinstance(cell.value, str) or token not in cell.value:
+                    continue
+                if cell.value == token and not isinstance(value, str):
+                    _set_value(cell, value)
+                else:
+                    _set_value(cell, cell.value.replace(token, str(value)))
+                count += 1
+    return count
 
 
 class XlsxAdapter:
@@ -64,6 +90,30 @@ class XlsxAdapter:
         finally:
             wb.close()
         return self.inspect(out_path)
+
+    def fill(self, path: Path, assignments: Mapping[AnyLocator, FillValue], out_path: Path) -> Document:
+        wb = load_workbook(str(path))
+        try:
+            for locator, value in assignments.items():
+                self._fill_one(wb, locator, value)
+            wb.save(str(out_path))
+        finally:
+            wb.close()
+        return self.inspect(out_path)
+
+    def _fill_one(self, wb: Any, locator: AnyLocator, value: FillValue) -> None:
+        if isinstance(locator, PlaceholderLocator):
+            if not _replace_token(wb, locator.token, value):
+                raise KeyError(f"자리표시자가 없다: {locator.token}")
+            return
+        if not isinstance(locator, SheetCellLocator):
+            raise KeyError(f"XLSX 에 쓸 수 없는 자리: {locator.kind}")
+        if locator.sheet not in wb.sheetnames:
+            raise KeyError(f"시트가 없다: {locator.sheet}")
+        cell = wb[locator.sheet][locator.cell]
+        if isinstance(cell, MergedCell):
+            raise KeyError(f"병합 범위의 왼쪽 위 칸이 아니다: {locator.sheet}!{locator.cell}")
+        _set_value(cell, value)
 
     def to_html(self, path: Path) -> str:
         doc = self.inspect(path)
