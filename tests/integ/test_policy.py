@@ -37,6 +37,7 @@ def auth_client(monkeypatch, tmp_path):
         (f"/api/sessions?token={KEY}", {}, 200),
         ("/", {}, 200),
         ("/brand.js", {}, 200),
+        ("/api/health", {}, 200),
     ],
 )
 def test_api_requires_key_but_static_shell_stays_open(auth_client, url, headers, code):

@@ -1,8 +1,8 @@
 name: Release
 
-# develop 을 main 에 머지하면 지난 태그 뒤 커밋 제목으로 다음 버전을 정해 릴리즈한다.
+# main 에 커밋이 들어오면 지난 태그 뒤 커밋 제목으로 다음 버전을 정해 릴리즈한다.
 # Feat 은 minor, Fix 같은 나머지는 patch, `!` 는 major. Docs, Test, Chore 만 있으면 릴리즈하지 않는다.
-# 버전 파일을 올린 커밋과 태그를 main 에 올리고, GitHub Release 를 만들고, main 을 develop 에 되돌려 합친다.
+# 버전 파일을 올린 커밋과 태그를 main 에 올리고 GitHub Release 를 만든다. 공개 저장소에는 develop 이 없다.
 # 그 뒤 desktop.yml 을 불러 데스크톱 앱(dmg, zip)을 같은 Release 에 올린다.
 # 다시 돌려도 새 커밋이 없으면 올릴 버전이 없어 아무것도 하지 않는다.
 on:
@@ -67,14 +67,6 @@ jobs:
           range="${LAST:+$LAST..}v$VERSION"
           git log --no-merges --format='- %s' "$range" | grep -v '^- Release:' > notes.md
           gh release create "v$VERSION" --title "v$VERSION" --notes-file notes.md
-
-      - name: Sync develop
-        if: steps.plan.outputs.version != ''
-        run: |
-          git fetch origin develop
-          git checkout -B develop origin/develop
-          git merge --no-edit main
-          git push origin develop
 
   desktop:
     needs: release

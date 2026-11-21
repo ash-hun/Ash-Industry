@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 __all__ = ["STATIC_DIR", "create_app"]
 
 
+# 키 없이 여는 API. 상태를 바꾸지 않고 비밀값이 없는 것만 둔다
+OPEN_API_PATHS = frozenset({"/api/health"})
+
+
 def create_app(
     assembly: "AppAssembly", initial_session_id: str = "default", restart: ProcessRestart | None = None
 ) -> FastAPI:
@@ -44,8 +48,10 @@ def create_app(
 
     @app.middleware("http")
     async def require_api_key(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        # /api/* 만 보호한다. 정적 셸(index, js, css)은 키 없이 받아야 키 입력 화면이 뜬다
-        if request.url.path.startswith("/api/") and auth_enabled(settings):
+        # /api/* 만 보호한다. 정적 셸(index, js, css)은 키 없이 받아야 키 입력 화면이 뜬다.
+        # health 는 데스크톱 셸이 키 없이 살아 있는지만 본다(키를 켜면 셸이 부팅 화면에서 멈췄다)
+        path = request.url.path
+        if path.startswith("/api/") and path not in OPEN_API_PATHS and auth_enabled(settings):
             token = bearer_token(request.headers.get("authorization")) or request.query_params.get("token")
             if lookup_api_user(settings, token) is None:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)

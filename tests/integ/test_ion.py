@@ -6,7 +6,7 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from tests.unit.test_ion_watch_service import FakeBackend, FakeDocker, _service  # noqa: E402
+from tests.fixtures.ion_helpers import FakeBackend, FakeDocker, make_watch_service  # noqa: E402
 from ash_industry.ion.ion_app import EventHub, build_ion_app  # noqa: E402
 from ash_industry.ion.watch_service import sse_line  # noqa: E402
 
@@ -15,7 +15,7 @@ def _app(tmp_path, key: str | None):  # type: ignore[no-untyped-def]
     backend, docker = FakeBackend(), FakeDocker()
     backend.ok = False
     # 배경 루프는 한 시간에 한 번만 돌게 해 두고 tick 은 테스트가 직접 부른다
-    svc, _ = _service(tmp_path, backend, docker, poll_sec=3600)
+    svc, _ = make_watch_service(tmp_path, backend, docker, poll_sec=3600)
     return build_ion_app(svc, EventHub(), key), svc, docker
 
 
@@ -56,7 +56,7 @@ async def test_event_hub_streams_hello_then_published_events():
 async def test_incident_titles_use_the_agent_display_name_from_metrics(tmp_path):
     backend, docker = FakeBackend(), FakeDocker()
     backend.rows = [{"agent": "scribe", "name": "S.C.R.I.B.E.", "fail_streak": 3, "jobs": 1}]
-    svc, _ = _service(tmp_path, backend, docker, poll_sec=3600)
+    svc, _ = make_watch_service(tmp_path, backend, docker, poll_sec=3600)
     app = build_ion_app(svc, EventHub(), None)
     await svc.tick()
     with TestClient(app) as client:

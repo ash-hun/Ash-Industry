@@ -1,76 +1,14 @@
 """ion 의 감시 루프: 무응답 3회에 사고 하나와 알림 하나, 회복하면 닫히고, 답은 처음 한 번만 행동한다."""
 
-from typing import Any
-from datetime import datetime
 
-from ash_industry.ion.watch_service import WatchService, notification, to_observation
-from ash_industry.ion.incident_store import Incident, IncidentStore
+from tests.fixtures.ion_helpers import FakeBackend, FakeDocker, make_watch_service
+from ash_industry.ion.watch_service import notification, to_observation
 from ash_industry.ion.docker_client import ContainerState
-from ash_industry.ion.ion_config import IonConfig
-
-NOON = datetime(2026, 11, 12, 12, 0)
-
-
-class FakeBackend:
-    def __init__(self) -> None:
-        self.ok = True
-        self.toggled: list[tuple[str, bool]] = []
-        self.rows: list[dict[str, Any]] = [{"agent": "scribe", "jobs": 1, "fail_streak": 0, "last_ok_ms": 5}]
-
-    async def health(self) -> bool:
-        return self.ok
-
-    async def metrics(self) -> dict[str, Any] | None:
-        return {"loop_lag": {"max_ms": 1.0}, "agents": list(self.rows)}
-
-    async def jobs(self) -> list[dict[str, Any]]:
-        return [{"name": "goal-1", "agent": "scribe", "enabled": True},
-                {"name": "off", "agent": "scribe", "enabled": False}]
-
-    async def set_task_enabled(self, name: str, enabled: bool) -> bool:
-        self.toggled.append((name, enabled))
-        return True
-
-
-class FakeDocker:
-    def __init__(self) -> None:
-        self.restarts = 0
-        self.log_calls: list[tuple[int | None, int | None, int]] = []
-
-    async def find(self, service: str) -> ContainerState | None:
-        return ContainerState("abc", service, "running", 0)
-
-    async def with_stats(self, state: ContainerState) -> ContainerState:
-        return state
-
-    async def restart(self, service: str) -> bool:
-        self.restarts += 1
-        return True
-
-    async def stop(self, service: str) -> bool:
-        return True
-
-    async def logs(self, service: str, since_s: int | None, until_s: int | None, tail: int) -> str:
-        self.log_calls.append((since_s, until_s, tail))
-        return "[Loop] boom\nTraceback"
-
-
-def _service(tmp_path, backend: FakeBackend, docker: FakeDocker, poll_sec: float = 0):  # type: ignore[no-untyped-def]
-    sent: list[dict[str, Any]] = []
-    clock = iter(range(1, 1000))
-
-    async def notify(payload: dict[str, Any]) -> None:
-        sent.append(payload)
-
-    cfg = IonConfig(poll_sec=poll_sec, metrics_every=1, data_dir=str(tmp_path))
-    svc = WatchService(cfg, backend, docker, IncidentStore(tmp_path / "incidents.json"), notify,  # type: ignore[arg-type]
-                       now_ms=lambda: next(clock) * 1000, clock=lambda: NOON)
-    return svc, sent
-
+from ash_industry.ion.incident_store import Incident
 
 async def test_three_failures_open_one_incident_notify_once_and_recovery_closes_it(tmp_path):
     backend, docker = FakeBackend(), FakeDocker()
-    svc, sent = _service(tmp_path, backend, docker)
+    svc, sent = make_watch_service(tmp_path, backend, docker)
     backend.ok = False
 
     for _ in range(4):
@@ -91,7 +29,7 @@ async def test_three_failures_open_one_incident_notify_once_and_recovery_closes_
 
 async def test_restart_backend_restarts_each_time_it_is_asked(tmp_path):
     backend, docker = FakeBackend(), FakeDocker()
-    svc, _ = _service(tmp_path, backend, docker)
+    svc, _ = make_watch_service(tmp_path, backend, docker)
 
     assert await svc.restart_backend() is True and await svc.restart_backend() is True
     assert docker.restarts == 2
@@ -99,7 +37,7 @@ async def test_restart_backend_restarts_each_time_it_is_asked(tmp_path):
 
 async def test_respond_acts_once_and_pause_disables_only_enabled_jobs_of_the_agent(tmp_path):
     backend, docker = FakeBackend(), FakeDocker()
-    svc, _ = _service(tmp_path, backend, docker)
+    svc, _ = make_watch_service(tmp_path, backend, docker)
     svc.store.open(Incident("backend_down:backend:0", "backend_down", "backend", "x", 1))
     svc.store.open(Incident("agent_failing:scribe:0", "agent_failing", "scribe", "x", 1))
 
