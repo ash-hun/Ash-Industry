@@ -139,7 +139,7 @@ ASH_USER_MODEL__BUILD_SOURCE_LIMIT=30   # /usermodel build 가 증류에 쓰는 
 ## 보안
 
 ```bash
-ASH_SECURITY__API_KEYS='{"<long-random-key>": {"name": "jh", "roles": ["admin"]}}'
+ASH_SECURITY__API_KEYS='{"<long-random-key>": {"name": "me", "roles": ["admin"]}}'
 ASH_SECURITY__ALLOWED_ROLES=["user","admin"]
 ASH_SECURITY__INPUT_MAX_LENGTH=10000
 ASH_SECURITY__APPROVALS_PATH=~/.ash/approvals.yaml        # 공용 규칙(사람이 고친다)
@@ -148,11 +148,19 @@ ASH_SECURITY__REQUIRE_APPROVAL_FOR=["bash","write_file","edit_file"]  # 실행 �
 ASH_SECURITY__DANGEROUS_COMMANDS=[...]                          # 위험 명령 정규식. bash 의 command 에 걸리면 승인 없이 막는다. [] 이면 끈다
 ```
 
-`API_KEYS` 를 비우면 Web 인증이 꺼진다. 인증을 켜고 끄는 다른 스위치는 없다. `REQUIRE_AUTH` 와 `ALLOWED_ROLES` 는 설정에 있지만 읽는 코드가 없다. 실행 전 안전장치는 `REQUIRE_APPROVAL_FOR` 의 승인과 승인 규칙이다. 키가 곧 사용자 식별자이므로 길고 무작위인 값을 쓴다.
+`API_KEYS` 를 비우면 Web 인증이 꺼진다. 키를 두면 `/api/*` 와 `/ws` 가 키를 요구하고, HUD 는 처음 거절될 때 접근 키 창을 띄운다([접근 키 넣기](../start/web-hud.md#접근-키-넣기)). `/api/health` 와 정적 화면 파일은 키 없이 열려 있다. 인증을 켜고 끄는 다른 스위치는 없다. `REQUIRE_AUTH` 와 `ALLOWED_ROLES` 는 설정에 있지만 읽는 코드가 없다. 실행 전 안전장치는 `REQUIRE_APPROVAL_FOR` 의 승인과 승인 규칙이다. 키가 곧 사용자 식별자이므로 길고 무작위인 값을 쓴다.
 
 ## MCP 서버
 
-`mcp_servers` 는 목록 설정이다. 항목마다 `name`, `transport`(`stdio`, `http`), `command`, `url`, `env`, `headers`, `auth_token`, `timeout`(30)을 둔다. 항목 예시는 [Extension](../concepts/extension.md) 에 있다.
+`mcp_servers` 는 목록 설정이다. 항목마다 `name`, `transport`(`stdio`, `http`, `streamable-http`), `command`, `url`, `env`, `headers`, `auth_token`, `timeout`(30)을 둔다. 항목 예시는 [Extension](../concepts/extension.md) 에 있다.
+
+```bash
+ASH_SECURITY__MCP_POLICY_PATH=~/.ash/mcp_policy.yaml  # MCP 도구별 allow, ask, deny 와 에이전트별 서버
+ASH_SECURITY__MCP_AUDIT_PATH=~/.ash/mcp_audit.jsonl   # MCP 호출 판정과 결과 기록
+ASH_DOCS_DIR=~/Documents/ash   # compose 전용. 문서 도구가 읽고 쓰는 폴더. ash-mcp 컨테이너의 /data/documents 로 붙는다
+```
+
+Docker Compose 의 기본 `ASH_MCP_SERVERS` 에는 Google Workspace 서버(`ash-mcp:8000`)와 문서 도구 서버 `docs`(`ash-mcp:8001`, 시간 제한 180초)가 들어 있다. `ASH_MCP_SERVERS` 를 직접 적으면 이 기본 목록을 통째로 바꾸므로 쓰려는 서버를 모두 적는다. 정책 파일의 형식은 [Tool & Approve System](../concepts/conversation/tools-and-approval.md#mcp-도구-정책), 문서 도구는 [Document Tools](../concepts/conversation/documents.md) 에 있다.
 
 ## 절차 학습, 알림, 플러그인
 
@@ -223,6 +231,21 @@ ASH_VOICE__STT_FALLBACK=whisper     # whisper | 빈 값. 브라우저 STT 가 �
 ```
 
 영어 TTS 를 따로 두는 법은 [Voice Interface](../concepts/conversation/voice.md#영어-문장은-piper-음성으로) 에 있다. `STT_LANG` 은 브라우저 STT 만 쓴다. whisper 는 이 값을 읽지 않고 한국어로 고정돼 있다. 모델 크기를 바꾸면 처음 인식할 때 모델을 새로 받는다.
+
+## HUD 단축키
+
+HUD 창 안에서 쓰는 단축키다. SET 화면에서 고치면 `~/.ash/settings.yaml` 의 `shortcuts` 에 쌓인다.
+
+```yaml
+# ~/.ash/settings.yaml
+shortcuts:
+  voice_start: Ctrl+Shift+Enter      # 듣기 시작/토글
+  voice_stop: Escape                 # 읽기 멈춤
+  agent_prev: Ctrl+Shift+ArrowLeft   # 이전 에이전트
+  agent_next: Ctrl+Shift+ArrowRight  # 다음 에이전트
+```
+
+형식은 `Ctrl`, `Alt`, `Shift`, `Meta` 를 `+` 로 잇고 끝에 키 이름 하나다. 넷 가운데 둘이 같으면 저장을 거절한다. 환경변수로는 `ASH_SHORTCUTS__VOICE_START` 처럼 준다. 데스크톱 앱의 전역 단축키는 이 설정이 아니라 앱 설정(SET 화면 DESKTOP 카드)에 있다. 규칙은 [Web HUD 단축키](../start/web-hud.md#단축키) 에 있다.
 
 ## 화면과 브랜드
 

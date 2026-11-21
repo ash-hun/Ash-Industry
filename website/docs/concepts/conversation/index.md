@@ -30,9 +30,10 @@ Ash Industry 의 가장 기본이 되는 기능인 Conversation을 소개한다.
 | [Inner Thought](./inner-thought.md) | Conversation log 에 💭 표기가 보이면 Inner Thought 가 켜진 것이다 |
 | [Sessions](./sessions.md) | 저장소(JSONL, Postgres), 한 세션에 한 요청, 분기, 삭제, 서브 에이전트 세션, 시험 세션 |
 | [Proactive Dialogue](./proactive.md) | 사용자 입력이 없을 때도 백그라운드에서 돌다가, 알릴 일이 있으면 먼저 말한다. 알릴 필요가 없으면 아무것도 하지 않고, 이것이 자연스러운 동작이다 |
-| [Tool & Approve System](./tools-and-approval.md) | 내장 도구, 도구 호출 한 번의 검사 순서, 승인 기억, 절차 학습, 스킬과 플러그인, 보안 파이프라인 |
+| [Tool & Approve System](./tools-and-approval.md) | 내장 도구, 도구 호출 한 번의 검사 순서, 승인 기억, 절차 학습, 스킬과 플러그인, MCP 도구 정책, 보안 파이프라인 |
 | [Open Loop](./open-loop.md) | 약속 판정(근거, 같은 약속), 자동 닫힘, 임베딩 설정 |
 | [MCP Events](./mcp.md) | MCP 도구를 주기적으로 불러 새 항목을 성찰의 재료로 넣는 방식 |
+| [Document Tools](./documents.md) | DOCX, XLSX, HWPX 문서를 읽고, 미리보기 뒤 승인받아 고치고, 양식 템플릿을 값만으로 채우는 docs MCP 서버 |
 | [Scheduling](./scheduling.md) | `/schedule` 을 이용해 정한 시각에 알림이나 작업을 돌리고, 화면 앞에 없어도 결과를 전한다. |
 | [Goals](./goals.md) | 한 번 맡긴 일을 대화가 없는 동안에도 차례마다 진행한다 |
 | [Voice Interface](./voice.md) | STT, TTS, 영어 음성, 말로 이어 가는 대화, 음성 승인 |

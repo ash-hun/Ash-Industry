@@ -9,7 +9,7 @@ import FigureExpMcp from '@site/src/figures/exp-mcp.svg';
 
 # MCP Events
 
-MCP Events는 외부 MCP 도구를 주기적으로 불러, 새로 생긴 항목을 성찰의 재료로 넣는 기능이다. 캘린더나 메일 같은 소스에 새 항목이 생기면 사용자가 묻기 전에 main 이 먼저 알릴 수 있게 하는 입구 역할을 한다. 이벤트를 받아 말할지 정하는 일은 [Proactive Dialogue](./proactive.md) 의 성찰이 맡고, MCP Events 는 그 성찰에 무엇을 넣을지와 한 이벤트가 한 번만 전해지도록 하는 데까지를 다룬다.
+MCP Events는 외부 MCP 도구를 주기적으로 불러, 새로 생긴 항목을 성찰의 재료로 넣는 기능이다. 캘린더나 메일 같은 소스에 새 항목이 생기면 사용자가 묻기 전에 main 이 먼저 알릴 수 있게 하는 입구 역할을 한다. 이벤트를 받아 말할지 정하는 일은 [Proactive Dialogue](./proactive.md) 의 성찰이 맡고, MCP Events 는 그 성찰에 무엇을 넣을지와 한 이벤트가 한 번만 전해지도록 하는 데까지를 다룬다. 에이전트가 대화 중에 부르는 MCP 도구의 승인과 권한은 [Tool & Approve System](./tools-and-approval.md#mcp-도구-정책), 행정문서를 다루는 `docs` 서버는 [Document Tools](./documents.md) 에 있다.
 
 <figure className="info-fig">
   <InfoMcp />

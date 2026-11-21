@@ -259,11 +259,24 @@ parameters: '1. 파일 검색 패턴, 2. 주요 파일 경로, 3. 읽을 최대 
 
 - **스킬**: `~/.ash/skills/*.md` 에 둔다. `/name args` 가 본문으로 펼쳐져 LLM 프롬프트가 된다. 기동 때 읽고, 파일 감시가 켜져 있으면 바뀔 때 다시 읽는다
 - **플러그인**: `~/.ash/plugins/*.py` 에 둔다. 실제로 불리는 훅은 `before_agent_start`, `before_tool_call`(block 가능), `after_tool_call`(관찰만, 반환값은 무시), `on_message_end`(응답 교체 가능)다. `transform_context` 는 선언만 되어 있고 호출되지 않는다. 플러그인 하나의 오류는 격리된다
-- **MCP**: `mcp_servers` 설정의 서버에서 도구를 발견해 등록한다. `stdio` 와 `http`(SSE) 를 지원하고, 호출마다 새 연결을 연다. 서버 하나가 실패해도 다른 서버는 막히지 않는다. 쓰려면 `uv sync --extra mcp` 로 설치한다
+- **MCP**: `mcp_servers` 설정의 서버에서 도구를 발견해 등록한다. `stdio`, `http`(SSE), `streamable-http` 를 지원하고, 호출마다 새 연결을 연다. 서버 하나가 실패해도 다른 서버는 막히지 않는다. 쓰려면 `uv sync --extra mcp` 로 설치한다. 행정문서를 읽고 고치는 `docs` 서버는 [Document Tools](./documents.md) 에 있다
 
 :::note
 파일 감시(`ASH_PLUGIN__WATCH_FILES`, 기본 켜짐)는 기동 때 있던 도구, 스킬, 플러그인 디렉터리를 지켜본다. 파일을 더하거나 고치면 그 디렉터리만 다시 읽어 같은 이름을 덮어쓰고, 세션은 다음 턴부터 새 도구를 본다. 파일을 지운 도구와 스킬은 재시작 전까지 남는다. 기동 뒤에 만든 디렉터리, 에이전트 정의의 `tools` 로 골라 복사한 도구는 재시작해야 바뀐다.
 :::
+
+### MCP 도구 정책
+
+MCP 도구는 호출마다 `~/.ash/mcp_policy.yaml` 의 정책으로 allow, ask, deny 가운데 하나를 판정한다. ask 는 내장 도구와 같은 승인 모달로 묻고, deny 는 묻지 않고 이유를 도구 결과에 적어 돌려준다.
+
+- **도구 종류**: 서버가 단 도구 주석(`readOnlyHint`, `destructiveHint`)으로 읽기와 쓰기를 가른다. 주석이 없으면 이름 앞머리(`get_`, `list_`, `search_` 는 읽기, `send_`, `manage_`, `delete_` 는 쓰기)로 짐작하고, 그 밖은 unknown 이다
+- **기본값**: `defaults` 에서 종류별로 정한다. 읽기는 allow, 쓰기와 unknown 은 ask 다
+- **서버와 도구**: `servers.<서버>.tools.<도구>` 에 `mode`(allow, ask, deny), `lock`(인자 고정, 예: `{to: [허용 값]}`), `calls_per_hour`(시간당 상한)를 둔다. `servers.<서버>.lock` 은 그 서버의 모든 도구에 건다
+- **에이전트**: `agents.<id>.servers` 는 그 에이전트가 쓸 수 있는 서버 목록이고(없으면 전부), `agents.<id>.deny` 는 그 에이전트에게만 막는 도구다. 막힌 서버의 도구는 그 에이전트의 도구 목록에서도 빠진다
+- **판정 순서**: 인자 고정 위반, 도구 `deny`, 에이전트 제한, 시간당 상한, 도구 `mode`, 종류별 기본값 순으로 본다. 인자 고정은 "항상 허용" 규칙보다 먼저 본다
+- **사람이 없는 실행**: 스케줄과 목표 작업도 같은 판정을 쓰고, ask 도구는 실행하지 않고 로그에 남긴다
+
+서버와 도구 표(모드, 시간당 상한, 인자 고정)와 최근 호출 50건은 SET 화면에서 보고 고친다. 에이전트별 정책은 파일로만 고친다. 모든 판정과 결과는 `~/.ash/mcp_audit.jsonl` 에 남고, 비밀값처럼 보이는 인자는 `***` 로 가린다.
 
 ### 보안 파이프라인
 
