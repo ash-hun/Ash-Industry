@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 184" class="pf-svg" role="img" aria-label="main 이 팀 에이전트에게 맡기는 위임 실험">
 <defs><marker id="exp-team-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="pf-head" d="M0,1 L10,5 L0,9 z"/></marker><marker id="exp-team-h-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="pf-head pf-head--accent" d="M0,1 L10,5 L0,9 z"/></marker><marker id="exp-team-h-deny" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="pf-head pf-head--deny" d="M0,1 L10,5 L0,9 z"/></marker><marker id="exp-team-h-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="pf-head pf-head--muted" d="M0,1 L10,5 L0,9 z"/></marker></defs>
 <rect class="pf-panel" x="10" y="10" width="740" height="164" rx="8"/>
-<text class="pf-plabel" x="22" y="31">청약 공고 찾기 위임 3회: 끝까지 걸린 시간(초, 중앙값)</text>
+<text class="pf-plabel" x="22" y="31">공고 찾기 위임 3회: 끝까지 걸린 시간(초, 중앙값)</text>
 <rect class="pf-s2" x="30" y="42" width="12" height="12" rx="2"/>
 <text class="pf-lab" x="48.0" y="53.0" text-anchor="start">gemma4:e4b (두 에이전트)</text>
 <rect class="pf-s3" x="222.25500000000002" y="42" width="12" height="12" rx="2"/>

@@ -130,12 +130,12 @@ def test_build_session_with_parent_inherits_persona_model_memory_and_tool_pool(c
 
     builder.build_session(
         AgentDefinition(
-            name="housing", description="d", parent="scribe", tools=["read_file", "bash"], system_prompt="청약 규칙"
+            name="housing", description="d", parent="scribe", tools=["read_file", "bash"], system_prompt="문서 규칙"
         ),
         "agent_housing__s1",
     )
 
-    assert captured["system_prompt"].startswith("스크라이브처럼 말한다.") and "청약 규칙" in captured["system_prompt"]
+    assert captured["system_prompt"].startswith("스크라이브처럼 말한다.") and "문서 규칙" in captured["system_prompt"]
     assert captured["memory_agent"] == "scribe" and captured["agent_name"] == "housing"
     assert sorted(t.name for t in captured["tool_registry"].list_all()) == ["bash", "read_file"]
     assert captured["model"].provider == "openai" and captured["model"].model == "gpt-4o"

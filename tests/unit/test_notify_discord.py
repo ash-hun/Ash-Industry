@@ -29,12 +29,12 @@ def test_format_discord_bolds_head_truncates_and_blocks_mentions():
         ({"type": "reminder", "kind": "reminder", "label": "알림", "text": "회의"}, "**⏰ 알림**"),
         # 뒤로 넘긴 작업의 답은 먼저 건넨 말과 다르게 보인다
         (
-            {"type": "proactive_message", "kind": "answer", "agent_name": "K.A.R.E.N.", "text": "끝"},
-            "**💬 K.A.R.E.N.**",
+            {"type": "proactive_message", "kind": "answer", "agent_name": "S.C.R.I.B.E.", "text": "끝"},
+            "**💬 S.C.R.I.B.E.**",
         ),
         (
-            {"type": "proactive_message", "kind": "proactive", "agent_name": "K.A.R.E.N.", "text": "?"},
-            "**💭 K.A.R.E.N.**",
+            {"type": "proactive_message", "kind": "proactive", "agent_name": "S.C.R.I.B.E.", "text": "?"},
+            "**💭 S.C.R.I.B.E.**",
         ),
     ],
     ids=["tool_task", "task", "reminder", "deferred_answer", "proactive"],

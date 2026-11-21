@@ -13,7 +13,7 @@ METRICS_EXAMPLE = {
     "agents": [
         {"agent": "scribe", "jobs": 1, "running": 0, "fail_streak": 0, "last_ok_ms": 1794499200000,
          "last_error": "", "open_sessions": 0, "scheduled": True, "last_active_ms": 1794499200000,
-         "name": "K.A.R.E.N."},
+         "name": "S.C.R.I.B.E."},
         {"agent": "main", "jobs": 0, "running": 0, "fail_streak": 0, "last_ok_ms": None, "last_error": "",
          "open_sessions": 1, "scheduled": False, "last_active_ms": 1794499980000, "name": "A.S.H."},
         {"agent": "shared", "jobs": 2, "running": 0, "fail_streak": 0, "last_ok_ms": 1794499980000,

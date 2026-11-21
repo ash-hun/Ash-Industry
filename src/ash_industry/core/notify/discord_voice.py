@@ -41,7 +41,7 @@ def speech_of(payload: dict[str, Any], clean: Callable[[str], str]) -> tuple[str
     parts = [p for p in (who, "" if title == who else title, clean(body)) if p]
     if not parts:
         return "", False
-    # 이름 끝의 마침표(K.A.R.E.N.)와 잇는 마침표가 겹치지 않게
+    # 이름 끝의 마침표(S.C.R.I.B.E.)와 잇는 마침표가 겹치지 않게
     lead = ". ".join(p.rstrip(". ") for p in parts[:-1])
     text = f"{lead}. {parts[-1]}" if lead else parts[-1]
     if len(text) <= SPEAK_MAX_CHARS:

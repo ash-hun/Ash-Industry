@@ -513,7 +513,7 @@ def exp_team(r: dict) -> Fig:
     draw = bars_with_legend(
         fig, list(names), rows, 40, [0, 10, 20, 30, 40], "{:.0f}", "{:.1f}s", names, note, axis_title="시간 (초)"
     )
-    y = section(fig, 10, "청약 공고 찾기 위임 3회: 끝까지 걸린 시간(초, 중앙값)", draw)
+    y = section(fig, 10, "공고 찾기 위임 3회: 끝까지 걸린 시간(초, 중앙값)", draw)
     return finish(fig, y)
 
 
