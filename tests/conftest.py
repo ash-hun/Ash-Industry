@@ -48,6 +48,12 @@ def _guarded_connect_ex(self: socket.socket, address: object) -> int:
 
 
 @pytest.fixture(autouse=True)
+def isolated_home(monkeypatch, tmp_path_factory):
+    # 설정 기본 경로(~/.ash/focus 등)를 그대로 쓰는 조립이 실제 홈에 폴더를 만들었다(2026-11-21 실측)
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+
+
+@pytest.fixture(autouse=True)
 def block_external_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
