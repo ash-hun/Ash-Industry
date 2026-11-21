@@ -1,6 +1,6 @@
 {
   "name": "ash-industry-desktop",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Ash Industry Web HUD 를 띄우는 Electron 셸. 백엔드는 docker compose 의 ash-backend 이고 앱은 띄우지 않는다.",
   "main": "main.js",
