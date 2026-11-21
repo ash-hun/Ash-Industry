@@ -234,7 +234,9 @@ def build_server(service: DocsService) -> MCPServer:
     )
     server.tool(
         name="list_documents", annotations=READ,
-        description="문서 폴더의 파일 목록(DOCX, XLSX). subdir 로 하위 폴더만 볼 수 있다. 경로는 폴더 기준 상대 경로",
+        description=(
+            "문서 폴더의 파일 목록(DOCX, XLSX, HWPX, HWP). subdir 로 하위 폴더만 볼 수 있다. 경로는 폴더 기준 상대 경로"
+        ),
     )(service.list_documents)
     server.tool(
         name="inspect_document", annotations=READ,
@@ -253,7 +255,7 @@ def build_server(service: DocsService) -> MCPServer:
         name="apply_edit", annotations=WRITE,
         description=(
             "승인된 plan_id 를 적용해 원본 옆에 새 파일(.edited-<시각>)로 저장하고 검증 결과를 돌려준다."
-            " 원본은 그대로다"
+            " 원본은 그대로다. HWP 원본의 결과는 HWPX 로 저장한다"
         ),
     )(service.apply_edit)
     server.tool(

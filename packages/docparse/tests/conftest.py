@@ -2,6 +2,7 @@
 
 import pytest
 from pathlib import Path
+from hwpx import HwpxDocument
 from openpyxl import Workbook
 from docx import Document as new_docx
 
@@ -77,4 +78,42 @@ def form_xlsx_path(tmp_path: Path) -> Path:
     ws["C1"] = "비고: {{비고}}"
     path = tmp_path / "양식.xlsx"
     wb.save(str(path))
+    return path
+
+
+def _hwpx_form() -> HwpxDocument:
+    """굵은 run, run 셋에 걸친 자리표시자, 기준 글, 2x2 표, 병합 칸이 있는 표."""
+    doc = HwpxDocument.new()
+    doc.paragraphs[0].text = "출장 신청서"
+    para = doc.add_paragraph("", include_run=False)
+    para.add_run("신청자: ", bold=True)
+    para.add_run("{{이", italic=True)
+    para.add_run("름}}")
+    para.add_run(" 님")
+    doc.add_paragraph("성명:")
+    doc.add_paragraph("")
+    table = doc.add_table(2, 2)
+    table.cell(0, 0).text = "기간"
+    table.cell(0, 1).text = "{{기간}}"
+    table.cell(1, 0).text = "금액"
+    merged = doc.add_table(2, 3)
+    merged.cell(0, 0).text = "비고"
+    merged.merge_cells(0, 1, 0, 2)
+    return doc
+
+
+@pytest.fixture
+def hwpx_path(tmp_path: Path) -> Path:
+    path = tmp_path / "신청서.hwpx"
+    with _hwpx_form() as doc:
+        doc.save_to_path(path)
+    return path
+
+
+@pytest.fixture
+def hwp_path(tmp_path: Path) -> Path:
+    """python-hwpx 가 HWP 5.0 으로 쓴 같은 양식. 한/글이 만든 실제 HWP 는 아니다."""
+    path = tmp_path / "신청서.hwp"
+    with _hwpx_form() as doc:
+        doc.save_to_path(path)
     return path

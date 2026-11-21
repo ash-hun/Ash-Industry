@@ -5,7 +5,7 @@ from typing import Any
 from pathlib import Path
 from datetime import datetime
 
-from docparse import SUPPORTED_SUFFIXES
+from docparse import SUPPORTED_SUFFIXES, output_suffix
 
 RENDER_DIR = ".render"
 TEMPLATE_DIR = ".templates"
@@ -37,9 +37,9 @@ class DocsPaths:
         return os.path.relpath(path, self.root)
 
     def output_for(self, source: Path, when: datetime, label: str = "edited") -> Path:
-        """원본 옆에 `<이름>.<label>-<시각>.<확장자>`. 원본은 덮어쓰지 않는다."""
+        """원본 옆에 `<이름>.<label>-<시각>.<확장자>`. 원본은 덮어쓰지 않는다. .hwp 원본의 결과는 .hwpx 다."""
         stamp = when.strftime("%Y%m%d-%H%M%S")
-        return source.with_name(f"{source.stem}.{label}-{stamp}{source.suffix}")
+        return source.with_name(f"{source.stem}.{label}-{stamp}{output_suffix(source)}")
 
     def render_dir(self, source: Path) -> Path:
         return self.root / RENDER_DIR / source.stem

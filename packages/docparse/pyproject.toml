@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "docparse"
 version = "0.1.0"
-description = "행정문서(DOCX, XLSX, ...)를 ID 가 붙은 구조로 읽고, 서식을 유지한 채 고치고, 렌더하는 파서"
+description = "행정문서(DOCX, XLSX, HWPX, ...)를 ID 가 붙은 구조로 읽고, 서식을 유지한 채 고치고, 렌더하는 파서"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
@@ -13,6 +13,8 @@ dependencies = [
     "openpyxl>=3.1",
     "mammoth>=1.8",
     "pypdf>=4.0",
+    "python-hwpx==6.12.0",
+    "rhwp-python==0.8.1",
 ]
 
 [tool.hatch.build.targets.wheel]

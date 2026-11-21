@@ -17,6 +17,8 @@ TEMPLATE_ID = r"^[0-9A-Za-z가-힣_-]{1,64}$"
 
 FieldType = Literal["text", "long_text", "date", "date_range", "number"]
 FillValue = str | int | float
+# 문단과 표가 있는 형식. table_cell, anchor_text 는 이 형식에만 쓴다
+TEXT_FORMATS = ("docx", "hwpx", "hwp")
 
 
 class TemplateValueError(ValueError):
@@ -37,7 +39,7 @@ class PlaceholderLocator(BaseModel):
 
 
 class TableCellLocator(BaseModel):
-    """DOCX 표의 셀 하나를 통째로 값으로 바꾼다. 0부터 센다."""
+    """DOCX, HWPX 표의 셀 하나를 통째로 값으로 바꾼다. 0부터 센다."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -48,7 +50,7 @@ class TableCellLocator(BaseModel):
 
 
 class AnchorTextLocator(BaseModel):
-    """DOCX 문단에서 after 글자 뒤. 뒤에 글이 있으면 그 글을, 없으면 다음 문단을 바꾼다."""
+    """DOCX, HWPX 문단에서 after 글자 뒤. 뒤에 글이 있으면 그 글을, 없으면 다음 문단을 바꾼다."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -92,7 +94,7 @@ class TemplateSchema(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     template_id: str = Field(pattern=TEMPLATE_ID)
-    format: Literal["docx", "xlsx"]
+    format: Literal["docx", "xlsx", "hwpx", "hwp"]
     kind: Literal["placeholder", "blank_form"]
     source_hash: str
     fields: tuple[TemplateField, ...] = Field(min_length=1)
@@ -158,8 +160,8 @@ def check_locators(schema: TemplateSchema, document: Document) -> list[str]:
                 issues.append(f"{item.name}: sheet_cell 은 XLSX 만")
             elif not any(t.name == loc.sheet for t in document.tables):
                 issues.append(f"{item.name}: 시트가 없다 {loc.sheet}")
-        elif document.format != "docx":
-            issues.append(f"{item.name}: {loc.kind} 는 DOCX 만")
+        elif document.format not in TEXT_FORMATS:
+            issues.append(f"{item.name}: {loc.kind} 는 DOCX, HWPX 만")
         elif isinstance(loc, TableCellLocator):
             table = next((t for t in document.tables if t.index == loc.table), None)
             if table is None or loc.row >= table.rows or loc.col >= table.cols:

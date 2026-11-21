@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from hwpx import HwpxDocument
 from docx import Document as new_docx
 
 from docs_mcp.docs_server import DocsService, build_server
@@ -122,3 +123,28 @@ def test_template_errors(service: DocsService) -> None:
     service.register_template("sub/a.docx", "인사-v1")
     bad = service.fill_template("인사-v1", {"성명": "x"})
     assert bad["issues"] == ["모르는 필드: 성명", "빠진 필수 필드: 이름"]
+
+
+def test_hwpx_listed_registered_filled_and_hwp_written_as_hwpx(service: DocsService, root: Path) -> None:
+    doc = HwpxDocument.new()
+    doc.paragraphs[0].text = "본문 {{이름}}"
+    doc.add_paragraph("성명:")
+    doc.add_paragraph("")
+    doc.save_to_path(root / "양식.hwpx")
+    doc.save_to_path(root / "옛양식.hwp")
+    listed = [d["path"] for d in service.list_documents()["documents"]]
+    assert listed == ["sub/a.docx", "양식.hwpx", "옛양식.hwp"]
+    fields = [
+        {"name": "이름", "locator": {"kind": "placeholder", "token": "{{이름}}"}},
+        {"name": "성명", "locator": {"kind": "anchor_text", "after": "성명:"}},
+    ]
+    registered = service.register_template("양식.hwpx", "양식-v1", "blank_form", fields)
+    assert registered["registered"] is True and registered["format"] == "hwpx"
+    filled = service.fill_template("양식-v1", {"이름": "홍길동", "성명": "김철수"})
+    assert filled["path"] == "양식.filled-20261116-090000.hwpx" and filled["verify"] == {"ok": True, "issues": []}
+    assert service.fill_template("양식-v1", {"이름": "홍길동", "성명": "김철수"}) == filled
+    texts = [p["text"] for p in service.inspect_document(filled["path"])["paragraphs"]]
+    assert texts == ["본문 홍길동", "성명:", "김철수"]
+    plan = service.plan_edit("옛양식.hwp", [{"target": "p0", "text": "본문 이영희"}])
+    applied = service.apply_edit(plan["plan_id"])
+    assert applied["output"] == "옛양식.edited-20261116-090001.hwpx" and applied["verify"]["ok"]
