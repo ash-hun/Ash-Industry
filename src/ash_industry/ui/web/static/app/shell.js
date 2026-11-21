@@ -1,0 +1,162 @@
+// 헤더·리액터 캡션·Activity·카드 접기·드로어 — 대화 밖의 HUD 외피.
+import { QUOTE, AGENT_ID } from './brand.js';
+
+const $clock       = document.getElementById('clock');
+const $linkTick    = document.getElementById('link-tick');
+const $uptime      = document.getElementById('uptime');
+const $caption     = document.getElementById('reactor-caption');
+const $activityLog = document.getElementById('activity-log');
+const $drawerBtn   = document.getElementById('drawer-btn');
+const $drawerScrim = document.getElementById('drawer-scrim');
+
+export const CAPTION_HOLD_MS = 20000;
+const ACTIVITY_MAX = 60;
+// 이 화면이 열린 동안의 활동 줄. 에이전트를 바꾸면 그 에이전트의 줄만 다시 그린다
+const ACTIVITY_KEEP = 400;
+// 어느 에이전트의 일도 아닌 줄(연결, 재시작, 데스크톱, 웨이크워드, 에이전트끼리 함께 일함). 어느 에이전트를 보든 보인다
+export const SYSTEM = null;
+const _activity = [];
+const DRAWER_MAX_WIDTH = 860;  // styles.css 의 @media (max-width: 860px) 와 같은 값
+
+// ── Clock · Uptime ────────────────────────────────────────────────────────────
+const pad = (n) => String(n).padStart(2, '0');
+const _startTime = Date.now();
+
+const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+function updateClock() {
+  const d = new Date();
+  const date = `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+  $clock.textContent = `${date} ${WEEKDAYS[d.getDay()]} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  $clock.dateTime = d.toISOString();
+}
+function updateUptime() {
+  const s = Math.floor((Date.now() - _startTime) / 1000);
+  $uptime.textContent = `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+}
+setInterval(updateClock, 1000);
+setInterval(updateUptime, 1000);
+updateClock();
+updateUptime();
+
+// ── 상태 ──────────────────────────────────────────────────────────────────────
+// 헤더에 글로 보이지 않는다. 리액터 상태 줄과 음성 흐름이 지금 무엇을 하는지 판단할 때 읽는다
+let _status = 'READY';
+export function setStatus(label, cls = '') {
+  _status = label;
+  document.body.dataset.status = cls || 'ready';
+}
+export function currentStatus() { return _status; }
+
+// 이름 옆 점이 백엔드 연결을 보인다. 세션이 붙으면 online, 소켓이 끊기면 offline
+export function setLinkState(online, label = online ? '연결됨' : '연결 끊김') {
+  document.body.dataset.link = online ? 'online' : 'offline';
+  $linkTick.setAttribute('aria-label', label);
+  $linkTick.title = label;
+}
+setLinkState(false);
+
+// ── Reactor caption ───────────────────────────────────────────────────────────
+// 쉴 때는 명언, 응답·proactive 메시지가 오면 그 한 줄. 잠시 뒤 명언으로 돌아간다.
+let _captionTimer = null;
+
+function setCaption(text, kind) {
+  const swap = () => {
+    $caption.className = `reactor-caption ${kind}`;
+    $caption.textContent = text;
+  };
+  if ($caption.classList.contains(kind)) { swap(); return; }
+  $caption.classList.add('fading');
+  setTimeout(swap, 350);
+}
+
+export function showQuote() {
+  clearTimeout(_captionTimer);
+  setCaption(QUOTE, 'quote');
+}
+
+export function showLive(text, holdMs = 0) {
+  clearTimeout(_captionTimer);
+  setCaption(text, 'live');
+  if (holdMs) _captionTimer = setTimeout(showQuote, holdMs);
+}
+
+// 마크다운 기호를 걷어낸 마지막 비어 있지 않은 줄. 스트리밍 중 반쯤 온 링크("[이름](")도 글자만 남긴다
+function plainLine(l) {
+  return l
+    .replace(/\[([^\]]*)\]\([^)]*\)?/g, '$1')
+    .replace(/[[\]]/g, '')
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
+    .replace(/[#*`>_]/g, '')
+    .trim();
+}
+
+export function lastLine(text) {
+  const lines = text.split('\n').map(plainLine).filter(Boolean);
+  const line = lines.length ? lines[lines.length - 1] : '';
+  return line.length > 160 ? line.slice(0, 157) + '…' : line;
+}
+
+// ── Activity log ──────────────────────────────────────────────────────────────
+function activityRow({ time, text, kind }) {
+  const li = document.createElement('li');
+  if (kind) li.className = kind;
+  li.innerHTML = `<time>${time}</time><span class="msg-text"></span>`;
+  const span = li.querySelector('.msg-text');
+  span.textContent = text;
+  span.title = text;
+  return li;
+}
+
+const visible = (entry) => entry.agent === SYSTEM || entry.agent === AGENT_ID;
+
+// agent 를 안 주면 지금 보는 에이전트의 일로 적는다. 에이전트와 상관없는 줄은 SYSTEM 으로 준다
+export function logActivity(text, kind = '', agent = AGENT_ID) {
+  const d  = new Date();
+  const entry = { time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`, text, kind, agent };
+  _activity.push(entry);
+  if (_activity.length > ACTIVITY_KEEP) _activity.shift();
+  if (!visible(entry)) return;
+  $activityLog.prepend(activityRow(entry));
+  while ($activityLog.children.length > ACTIVITY_MAX) $activityLog.lastElementChild.remove();
+}
+
+// 에이전트를 바꿨다. 그 에이전트의 줄과 시스템 줄로 다시 그린다
+export function renderActivity() {
+  const rows = _activity.filter(visible).slice(-ACTIVITY_MAX).reverse().map(activityRow);
+  $activityLog.replaceChildren(...rows);
+}
+
+// ── Card collapse ─────────────────────────────────────────────────────────────
+// 접힘 여부는 뷰어별 편의 설정이라 localStorage 에만 둔다(없어도 동작).
+export function setupCollapse(toggleId, bodyClass, storageKey, onExpand) {
+  try {
+    if (localStorage.getItem(storageKey) === '1') document.body.classList.add(bodyClass);
+  } catch { /* storage 차단 — 기본(펼침)으로 */ }
+  document.getElementById(toggleId).addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;  // 헤더 안의 버튼(+)은 접기가 아니다
+    const next = !document.body.classList.contains(bodyClass);
+    document.body.classList.toggle(bodyClass, next);
+    try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch { /* 무시 */ }
+    if (!next && onExpand) onExpand();
+  });
+}
+
+// ── Mobile drawer ─────────────────────────────────────────────────────────────
+// 좁은 화면에서 아젠다·활동·시스템 카드(.hud-side)는 오버레이 드로어가 된다.
+// 데스크탑에서는 버튼이 숨겨져 있어 이 코드가 실행될 일이 없다.
+function setDrawer(open) {
+  document.body.classList.toggle('drawer-open', open);
+  $drawerScrim.hidden = !open;
+  $drawerBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  $drawerBtn.setAttribute('aria-label', open ? '패널 닫기' : '패널 열기');
+}
+
+$drawerBtn.addEventListener('click', () => setDrawer(!document.body.classList.contains('drawer-open')));
+$drawerScrim.addEventListener('click', () => setDrawer(false));
+// 세션을 고르면 드로어를 닫아 바로 대화로 돌아간다.
+document.getElementById('session-list').addEventListener('click', () => setDrawer(false));
+document.getElementById('new-session-btn').addEventListener('click', () => setDrawer(false));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setDrawer(false); });
+// 데스크탑 폭으로 돌아오면 드로어 상태를 남기지 않는다.
+window.addEventListener('resize', () => { if (window.innerWidth > DRAWER_MAX_WIDTH) setDrawer(false); });

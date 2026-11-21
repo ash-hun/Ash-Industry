@@ -1,0 +1,195 @@
+"""[model_layer] 메시지, 콘텐츠 블록, 스트리밍 이벤트, 모델 설정의 공통 타입을 정의한다."""
+
+import time
+from typing import Any, Literal
+from pydantic import BaseModel, Field
+from collections.abc import AsyncIterator, Callable
+
+# ── Content blocks ────────────────────────────────────────────────────────────
+
+class TextContent(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ThinkingContent(BaseModel):
+    type: Literal["thinking"] = "thinking"
+    thinking: str
+    redacted: bool = False
+
+
+class ImageContent(BaseModel):
+    type: Literal["image"] = "image"
+    data: str
+    mime_type: str
+
+
+class ToolCall(BaseModel):
+    type: Literal["tool_call"] = "tool_call"
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+# ── Messages ──────────────────────────────────────────────────────────────────
+
+class Usage(BaseModel):
+    input: int = 0
+    output: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.input + self.output
+
+
+StopReason = Literal["stop", "length", "tool_use", "error", "aborted"]
+
+
+class UserMessage(BaseModel):
+    role: Literal["user"] = "user"
+    content: str | list[TextContent | ImageContent]
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+
+
+class AssistantMessage(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: list[TextContent | ThinkingContent | ToolCall] = Field(default_factory=list)
+    provider: str = ""
+    model: str = ""
+    usage: Usage = Field(default_factory=Usage)
+    stop_reason: StopReason = "stop"
+    error_message: str | None = None
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+
+    def text(self) -> str:
+        return "".join(block.text for block in self.content if isinstance(block, TextContent))
+
+    def tool_calls(self) -> list[ToolCall]:
+        return [block for block in self.content if isinstance(block, ToolCall)]
+
+
+class Artifact(BaseModel):
+    """도구가 만든 결과물 파일. 화면이 플레이어나 미리보기로 띄운다. path 는 그 저장소 기준 상대 경로."""
+
+    kind: Literal["video", "audio", "image", "file"]
+    path: str
+    title: str = ""
+    # 어느 저장소의 파일인지. creative 는 /api/creative/files/<path> 로 받는다
+    store: str = "creative"
+
+
+class ToolResultMessage(BaseModel):
+    role: Literal["tool_result"] = "tool_result"
+    tool_call_id: str
+    tool_name: str
+    content: list[TextContent | ImageContent]
+    is_error: bool = False
+    # 결과물 파일. 루프가 tool_execution_end 이벤트에 실어 화면으로 보낸다
+    artifacts: list[Artifact] = Field(default_factory=list)
+    # 사용자가 승인하지 않아 실행하지 않은 결과. 루프가 이걸 보고 모델에 다시 묻지 않고 턴을 끝낸다
+    denied: bool = False
+    # denied 중 승인 요청이 시간 안에 답을 받지 못한 경우. 사용자에게 거부와 다르게 알린다
+    timed_out: bool = False
+    # 도구가 쓴 글이 곧 답이다. 한 번에 부른 결과가 모두 final 이면 루프가 모델에 다시 묻지 않고 이 글로 턴을 끝낸다
+    final: bool = False
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+
+
+Message = UserMessage | AssistantMessage | ToolResultMessage
+
+
+# ── Streaming events (Pi: AssistantMessageEvent 패턴) ─────────────────────────
+
+class TextDeltaEvent(BaseModel):
+    type: Literal["text_delta"] = "text_delta"
+    delta: str
+
+
+class ThinkingDeltaEvent(BaseModel):
+    type: Literal["thinking_delta"] = "thinking_delta"
+    thinking: str
+
+
+class ToolCallDeltaEvent(BaseModel):
+    type: Literal["tool_call_delta"] = "tool_call_delta"
+    id: str
+    name: str
+    arguments_delta: str
+
+
+class StopEvent(BaseModel):
+    type: Literal["stop"] = "stop"
+    reason: StopReason
+    usage: Usage = Field(default_factory=Usage)
+
+
+class ErrorEvent(BaseModel):
+    type: Literal["error"] = "error"
+    message: str
+    code: str | None = None
+
+
+StreamEvent = TextDeltaEvent | ThinkingDeltaEvent | ToolCallDeltaEvent | StopEvent | ErrorEvent
+
+
+# ── Tool definition ───────────────────────────────────────────────────────────
+
+class ToolParameter(BaseModel):
+    type: str
+    description: str | None = None
+    enum: list[str] | None = None
+    items: dict[str, Any] | None = None
+    properties: dict[str, Any] | None = None
+    required: list[str] | None = None
+
+
+class Tool(BaseModel):
+    name: str
+    description: str
+    parameters: dict[str, Any]
+    execution_mode: Literal["parallel", "sequential"] = "parallel"
+
+    def to_llm_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.parameters,
+        }
+
+
+# ── LLM request context ───────────────────────────────────────────────────────
+
+class ModelConfig(BaseModel):
+    provider: str
+    model: str
+    api_key: str | None = None
+    base_url: str | None = None
+    temperature: float = 0.7
+    max_tokens: int = 4096
+    timeout: float = 120.0
+
+
+class StreamOptions(BaseModel):
+    enable_thinking: bool = False
+    json_schema: dict[str, Any] | None = None  # 응답을 이 스키마로 강제. 지원하는 프로바이더만 쓴다(Ollama format)
+    thinking_budget: int = 10_000
+    system_prompt: str | None = None
+    stop_sequences: list[str] = Field(default_factory=list)
+
+
+class LLMContext(BaseModel):
+    messages: list[Message]
+    tools: list[Tool] | None = None
+    system_prompt: str | None = None  # 세션 동안 고정인 지시문. 프로바이더가 캐시 지점을 여기 둔다
+    system_suffix: str | None = None  # 턴마다 바뀌는 덧붙임(속생각, 규칙). 고정 지시문 뒤에 놓인다
+
+    def full_system_prompt(self) -> str | None:
+        """고정 지시문과 덧붙임을 한 문자열로. 시스템 메시지를 하나만 받는 프로바이더가 쓴다."""
+        return "\n\n".join(p for p in (self.system_prompt, self.system_suffix) if p) or None
+
+
+# ── Provider stream 함수 모양 ─────────────────────────────────────────────────
+
+ProviderStreamFn = Callable[[ModelConfig, LLMContext, StreamOptions | None], AsyncIterator[StreamEvent]]

@@ -1,0 +1,27 @@
+# MCP 컨테이너가 띄우는 서버 목록. 항목 하나가 프로세스 하나, 포트 하나다.
+# 새 MCP 서버를 붙이려면 여기 한 항목과 .env 의 ASH_MCP_SERVERS 에 한 항목을 더한다.
+# env 값의 ${VAR} 는 컨테이너 환경(.env)에서 채운다. 비밀값은 여기 적지 않는다.
+servers:
+  - name: google
+    # Gmail, Calendar 만 켠다. Drive, Docs 등은 --tools 에 더한다. 버전은 mcp/Dockerfile 의 uv tool install 과 맞춘다
+    command: ["workspace-mcp", "--transport", "streamable-http", "--tools", "gmail", "calendar"]
+    port: 8000
+    env:
+      WORKSPACE_MCP_PORT: "8000"
+      WORKSPACE_MCP_HOST: "0.0.0.0"
+      GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID}"
+      GOOGLE_OAUTH_CLIENT_SECRET: "${GOOGLE_OAUTH_CLIENT_SECRET}"
+      # 브라우저가 오는 호스트 포트(docker-compose 의 MCP_GOOGLE_PORT, 기본 8808). Google 클라이언트의 리디렉션 URI 와 같아야 한다
+      GOOGLE_OAUTH_REDIRECT_URI: "http://localhost:${MCP_GOOGLE_PORT:-8808}/oauth2callback"
+      WORKSPACE_EXTERNAL_URL: "http://localhost:${MCP_GOOGLE_PORT:-8808}"
+      # 콜백이 http 라 https 강제를 푼다
+      OAUTHLIB_INSECURE_TRANSPORT: "1"
+      USER_GOOGLE_EMAIL: "${USER_GOOGLE_EMAIL:-}"
+  - name: docs
+    # 행정문서 서버(packages/docs_mcp). 문서 폴더는 docker-compose 가 ASH_DOCS_DIR 를 /data/documents 로 붙인다
+    command: ["/opt/docs/.venv/bin/docs-mcp"]
+    port: 8001
+    env:
+      DOCS_ROOT: "/data/documents"
+      DOCS_PORT: "8001"
+      DOCS_HOST: "0.0.0.0"

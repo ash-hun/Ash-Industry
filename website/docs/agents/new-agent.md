@@ -1,0 +1,97 @@
+---
+sidebar_position: 1
+title: 팀 에이전트 추가하기
+---
+
+# 팀 에이전트 추가하기
+
+Ash Industry 는 main 하나에 모든 일을 몰지 않고, 목적이 다른 팀 에이전트를 늘려 쓰는 쪽을 지향한다. 이 페이지는 main 과 같은 층에 에이전트를 하나 더 두는 방법을 다룬다. 코드를 고치지 않고 정의 파일 하나로 늘린다. 에이전트마다 자기 세션, 기억, 약속, 승인 규칙, 메인 색을 가진다. 동작 원리는 [Multi agent Orchestration](../concepts/multi-agent-orchestration/index.md)에 있다.
+
+순서는 다음과 같다.
+
+1. 팀 디렉터리에 정의 파일을 만든다
+2. 항목을 채워 이름, 색, 말투, 모델을 정한다
+3. 쓸 도구를 고른다
+4. 서버를 다시 띄우고 로그와 화면에서 확인한다
+
+## 정의 파일 만들기
+
+팀 디렉터리에 `<id>.yaml` 파일을 하나 만든다. 파일 이름이 에이전트 id 가 된다.
+
+| 실행 방식 | 팀 디렉터리 |
+|---|---|
+| 로컬 (uv) | `~/.ash/team` |
+| Docker | 저장소의 `team/` (컨테이너의 `/app/team`, 읽기 전용 마운트) |
+
+다른 위치를 쓰려면 `ASH_TEAM__DIR` 을 바꾼다.
+
+id 는 `^[a-z][a-z0-9_-]{0,31}$` 를 따라야 한다. 소문자로 시작하고 32자 이하다. 세션, 기억, 승인 파일 이름에 그대로 들어가므로 나중에 바꾸지 않는다. `main.yaml` 은 main 자리라서 읽지 않는다.
+
+저장소의 `examples/team/scribe.yaml` 이 바로 쓸 수 있는 예시다. 회의록과 메모를 정리하는 문서 담당 에이전트 Scribe 를 정의한다.
+
+```bash
+mkdir -p ~/.ash/team && cp examples/team/scribe.yaml ~/.ash/team/   # 로컬
+mkdir -p team && cp examples/team/scribe.yaml team/                 # Docker
+```
+
+```yaml
+# examples/team/scribe.yaml
+name: S.C.R.I.B.E.
+description: 문서 담당. 회의록과 메모를 정리하고 요약한다
+quote: Write it down
+palette:
+  primary: "#8fd3a8"
+  accent: "#f0b35f"
+persona: |
+  너는 차분하고 꼼꼼한 기록 담당 Scribe 처럼 말한다. 짧은 존댓말이고, 들은 내용을 바꾸지 않는다.
+  - 결론을 먼저 말하고, 묻지 않은 설명은 붙이지 않는다.
+system_prompt: |
+  당신은 Scribe 입니다. main 과 같은 팀의 문서 담당입니다.
+  - 받은 글을 요약할 때는 원문에 없는 사실을 더하지 않습니다.
+  - 파일을 쓰라고 하면 write_file 로 새 파일을 만들고 기존 파일을 덮어쓰지 않습니다.
+tools: [read_file, write_file, list_dir]
+```
+
+## 항목 채우기
+
+정의 파일에 쓸 수 있는 항목은 아래가 전부다. `name` 만 필수이고, 비운 항목은 표의 "비웠을 때" 값을 쓴다.
+
+| 항목 | 필수 | 비웠을 때 | 설명 |
+|---|---|---|---|
+| `name` | 필수 | | HUD 워드마크이자 다른 에이전트가 부르는 이름 |
+| `description` | | 빈 문자열 | 다른 에이전트가 누구에게 일을 맡길지 고를 때 읽는다. 맡은 일을 구체적으로 쓴다 |
+| `quote` | | 빈 문자열 | HUD 에 뜨는 명언 |
+| `palette` | | main 기본 색 | `primary` 는 링, 입자 구, 패널, 에이전트 전환 화살표, AGENDA 라벨 색 |
+| `persona` | | 개성 없음 | 말투와 성격. 대화 답변(시스템 프롬프트 맨 앞)과 먼저 건네는 말, filler 에 같이 쓰인다. main 의 개성은 이어받지 않는다 |
+| `system_prompt` | | 비움 | 이 에이전트의 역할과 규칙. 말투는 `persona` 에 둔다. 모든 에이전트의 시스템 프롬프트 끝에는 "답은 간결하게" 공통 규칙(`agent_profile.ANSWER_RULE`)이 붙는다 |
+| `model` | | main 모델 | 모델 이름만 바꾼다. 프로바이더, 키, 주소는 main 것을 쓴다 |
+| `tools` | | 앱의 도구 전체 | 쓸 도구 이름 목록 |
+| `proactive` | | main 설정 | `false` 면 혼자 먼저 말을 걸지 않고 성찰도 건너뛴다 |
+| `boundaries` | | 경계 없음 | 스스로 할 때의 경계. `ask` 는 목표 차례, 스케줄 작업, 먼저 해 두기에서 하지 않는 도구, `never` 는 어디서도 쓰지 않는 도구다([Goals](../concepts/conversation/goals.md#경계)) |
+| `memory` | | 자기 기억만 | `read.edm`, `read.pdm` 에 이 에이전트가 더 읽을 에이전트 id 를 적는다. 사용자 프로필은 적지 않아도 모두 읽는다([Memory Management → 읽기 권한](../concepts/memory.md#읽기-권한)) |
+
+목록에 없는 항목을 넣으면 그 파일은 잘못된 파일로 처리된다.
+
+## 도구 고르기
+
+- `tools` 를 비우면 앱에 등록된 도구 전체를 쓴다. 역할이 좁은 에이전트는 필요한 도구만 적는다
+- `ask_agent`(다른 에이전트에게 맡기기), `remember_task_pattern`(작업 패턴 저장), `recall_episodes`(지난 일화 골라 읽기)는 적지 않아도 붙는다
+- 이 에이전트가 배운 승인된 절차 도구(`procedure_<name>`)도 적지 않아도 보인다. 다른 에이전트가 배운 절차는 보이지 않는다. 다만 절차의 단계는 이 에이전트의 도구로 돌므로 `tools` 에 없는 도구를 쓰는 단계에서 멈춘다
+- 확장 패키지가 등록한 에이전트 전용 도구도 이름을 적으면 쓸 수 있다([Extension](../concepts/extension.md#확장-패키지))
+- `tools` 를 비우고 `boundaries.never` 만 적으면 앱의 도구 전체에서 그 도구만 뺀다
+- 새 전용 도구는 확장 패키지(`~/.ash/extensions/<이름>/__init__.py` 의 `register(ctx)`)에서 `ctx.agent_tools` 에 등록하고 정의 파일의 `tools` 에 이름을 적는다. 플랫폼 코드는 고치지 않는다. 이 도구는 `tools` 가 빈 main 에게는 보이지 않는다
+
+## 반영하고 확인하기
+
+1. 서버를 다시 띄운다. 정의 파일은 서버가 뜰 때 한 번 읽는다. Docker 는 `docker compose restart ash-backend` 로 반영한다
+2. 백엔드 로그에서 `[Team] N agent(s) loaded: ...` 줄에 새 id 가 있는지 본다
+3. Web HUD 리액터 구체 양옆의 화살표를 눌러 새 에이전트로 넘어가는지 본다. 넘어가면 그 에이전트의 세션이 열리고 화면 색이 바뀐다
+4. `ash-industry --agent <id>` 로 띄우면 그 에이전트의 기본 세션(`default-<id>`)으로 HUD 가 열린다
+
+## 새 에이전트로 넘어가지 않을 때
+
+로그에서 `[Team] skip '<파일명>'` 줄을 찾는다. id 규칙 위반이나 YAML 형식 오류가 그 줄에 적힌다. 잘못된 파일 하나만 건너뛰고 나머지 에이전트는 그대로 뜬다.
+
+## 새 에이전트가 공유하는 것과 따로 갖는 것
+
+새 에이전트도 사용자 모델과 사용자 프로필(사용자에 대한 사실)은 main 과 공유한다. 턴마다 남는 일화 기억, 작업 패턴, **항상 허용** 승인 규칙은 그 에이전트에게만 쌓인다. 다른 에이전트의 일화와 작업 패턴은 `memory.read` 에 적은 것만 읽는다. 승인된 절차는 `memory.read` 와 상관없이 배운 에이전트만 쓴다.

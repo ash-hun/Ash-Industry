@@ -1,0 +1,10 @@
+{
+  "label": "Agent 소개",
+  "position": 3,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "기본 에이전트 main 과, 정의 파일 하나로 늘리는 팀 에이전트를 다룬다.",
+    "slug": "/agents"
+  }
+}

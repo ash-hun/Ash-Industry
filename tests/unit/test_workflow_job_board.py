@@ -1,0 +1,117 @@
+"""workflow 의 job board: 작업 실행의 시작과 끝, 실패를 작업마다 마지막 한 번씩 적는다."""
+
+import pytest
+
+from ash_industry.ui.web.router.workflow_router import merge_jobs, capability_map
+from ash_industry.core.workflow.workflow_types import JobRecord
+from ash_industry.core.workflow.job_board import JobBoard
+
+
+async def test_track_counts_runs_and_records_failure_then_reraises():
+    clock = iter(range(1, 100))
+    seen: list[JobRecord] = []
+
+    async def on_change(record: JobRecord) -> None:
+        seen.append(record)
+
+    board = JobBoard(clock=lambda: next(clock), on_change=on_change)
+    async with board.track("proactive:reflect", "proactive", "성찰"):
+        pass
+    with pytest.raises(ValueError):
+        async with board.track("proactive:reflect", "proactive", "성찰"):
+            raise ValueError("boom")
+
+    (record,) = board.records()
+    assert (record.runs, record.running, record.last_ok) == (2, False, False)
+    assert "boom" in record.last_error and record.last_started_ms == 3 and record.last_ended_ms == 4
+    assert [r.running for r in seen] == [True, False, True, False]
+
+
+async def test_fail_streak_counts_failures_until_a_success():
+    board = JobBoard(clock=lambda: 1)
+    await board.start("schedule:x", "schedule", "x")
+    await board.finish("schedule:x", False, "a")
+    await board.start("schedule:x", "schedule", "x")
+    await board.finish("schedule:x", False, "b")
+    assert board.records()[0].fail_streak == 2
+    await board.start("schedule:x", "schedule", "x")
+    await board.finish("schedule:x", True)
+    assert board.records()[0].fail_streak == 0
+
+
+async def test_finish_without_start_changes_nothing_and_on_change_failure_is_swallowed():
+    async def broken(_record: JobRecord) -> None:
+        raise RuntimeError("socket closed")
+
+    board = JobBoard(clock=lambda: 0, on_change=broken)
+
+    assert await board.finish("x", True) is None
+    wrapped = board.wrap("memory:consolidate", "consolidate", "정리", _three)
+    assert await wrapped() == 3
+    assert board.records()[0].last_ok is True
+
+
+async def _three() -> int:
+    return 3
+
+
+def test_merge_jobs_puts_schedules_first_including_never_run():
+    records = [
+        JobRecord(job_id="schedule:a", kind="schedule", label="A", runs=2, running=False, last_ok=True),
+        JobRecord(job_id="external:poll", kind="external", label="cal", runs=1, running=False),
+    ]
+    schedules = [
+        {"name": "a", "label": "A", "enabled": True, "next_run": "t1", "agent": "main"},
+        {"name": "b", "label": "B", "enabled": False, "next_run": None, "agent": "scribe"},
+    ]
+
+    jobs = merge_jobs(records, schedules)
+
+    assert [(j["job_id"], j["runs"]) for j in jobs] == [("schedule:a", 2), ("schedule:b", 0), ("external:poll", 1)]
+    assert jobs[1]["agent"] == "scribe" and "next_run" not in jobs[2]
+
+
+def test_capability_map_lists_own_tools_first_then_shared():
+    tools = {"main": ["bash", "web_search", "ask_agent"], "scribe": ["lh_notice", "web_search", "ask_agent"]}
+
+    caps = capability_map(tools)
+
+    assert caps == [
+        {"name": "bash", "agents": ["main"]},
+        {"name": "lh_notice", "agents": ["scribe"]},
+        {"name": "ask_agent", "agents": ["main", "scribe"]},
+        {"name": "web_search", "agents": ["main", "scribe"]},
+    ]
+
+
+def test_capability_map_skips_subagent_tools_and_duplicates():
+    caps = capability_map({"main": ["agent_researcher", "glob", "glob"]})
+
+    assert caps == [{"name": "glob", "agents": ["main"]}]
+
+
+async def test_load_continues_runs_and_marks_interrupted_job_as_not_running():
+    board = JobBoard(clock=lambda: 7)
+    stored = [
+        JobRecord("schedule:x", "schedule", "x", runs=4, running=False, last_ok=True),
+        JobRecord("proactive:reflect", "proactive", "성찰", runs=2, running=True, last_started_ms=5, last_ok=True),
+    ]
+
+    board.load(stored)
+    board.load(stored)
+
+    by_id = {r.job_id: r for r in board.records()}
+    assert (by_id["schedule:x"].runs, by_id["proactive:reflect"].running, by_id["proactive:reflect"].last_ok) == (
+        4, False, None,
+    )
+    await board.start("schedule:x", "schedule", "x")
+    assert board.records()[-1].runs == 5
+
+
+async def test_load_does_not_overwrite_a_job_already_seen():
+    board = JobBoard(clock=lambda: 1)
+    await board.start("schedule:x", "schedule", "x")
+
+    board.load([JobRecord("schedule:x", "schedule", "x", runs=9, running=False)])
+
+    assert board.records()[0].runs == 1

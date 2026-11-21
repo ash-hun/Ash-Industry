@@ -1,0 +1,163 @@
+---
+sidebar_position: 1
+title: Orchestration Pattern
+---
+
+import InfoOrchestrationPattern from '@site/src/figures/info-orchestration-pattern.svg';
+import FigureOrchestrationPattern from '@site/src/figures/orchestration-pattern.svg';
+import FigureExpOrchestration from '@site/src/figures/exp-orchestration.svg';
+
+# Orchestration Pattern
+
+한 작업이 여러 전문가나 단계를 거쳐야 할 때, main 이 그 작업을 여러 서브 에이전트에게 나눠 맡기고 결과를 모으는 방식을 소개한다. 나누는 방식은 Supervisor, Hierarchical, Market, Blackboard 네 가지 패턴 중에서 고르고, 패턴을 이어 붙여 Pipeline 으로도 쓴다.
+
+<figure className="info-fig">
+  <InfoOrchestrationPattern />
+</figure>
+
+서브 에이전트는 부모 턴 안에서 잠깐 도는 도구이고, 사용자와 직접 대화하는 에이전트가 아니다. 자기 세션, 약속, 승인 규칙, 브랜드를 가진 에이전트가 필요하면 [Multi agent Orchestration](./index.md)을 쓴다.
+
+## Orchestration Pattern이 주목한 점
+
+"분기 보고서 작성해 줘" 같은 일은 단계를 나누는 기획과 실제 글쓰기가 따로 필요하고, 글쓰기는 기획 결과를 봐야 한다. 기존의 단일 Agent는 한 턴 안에서 이 모든 일을 처리하려 하기 때문에 역할별 프롬프트와 도구를 나눌 수 없다. 여러 에이전트를 띄우는 우회 방안도 있지만, 단계 사이에 결과가 넘어가지 않으면 각자 따로 돈 결과만 남는다. Ash Industry 는 이러한 부분을 개선하기 위해 작업의 성격에 맞는 협업 패턴을 고르게 하고, 앞 단계의 결과가 다음 단계로 실제로 이어지도록 설계했다. 패턴은 사용자가 명령으로 직접 고르거나, 메인 에이전트가 작업을 보고 참여자와 함께 고른다.
+
+### 어떤 기능을 가지고 있나요?
+
+#### 패턴이 실제로 결과를 주고받게 했다
+
+- 에이전트 사이의 결과를 작업 범위의 공유 메모리(`[작업 공유 메모리]` 블록)로 넘겨, 앞 결과가 하위 에이전트 프롬프트에 들어가게 한다.
+- 대안으로는 처음 구현처럼 이전 결과와 블랙보드 내용을 작업 객체의 `context` 에만 넣고, 하위 에이전트 프롬프트에는 `content` 만 넘기는 방식이 있었다.
+- 처음 만든 네 패턴이 그 방식이었고, 그래서 Hierarchical 과 Blackboard 에서 하위 에이전트가 상위 결과를 전혀 보지 못하고 각자 따로 돌았다.
+
+#### 위임은 한 노드로
+
+- 위임을 `LazyAgentNode` 하나로 모았다. 자식 세션은 작업에 실린 부모 범위(`caller_scope`)에서 사용자를 받고, 부모 범위에 무엇을 맡겼는지 기록한다. 범위는 인자로만 넘긴다.
+- 대안으로는 예전처럼 오케스트레이터가 노드를 직접 부르는 길과 도구로 위임하는 길을 따로 두고, 위임하는 동안 전역 contextvar 를 자식 범위로 바꿨다가 되돌리는 방식이 있었다.
+- 길이 둘이면 한쪽에서 기억 범위 상속과 위임 기록이 빠졌다. 한 노드로 모으면 어느 길로 위임해도 같은 처리를 지난다.
+
+## 세부 동작
+
+### 한 눈에 보기
+
+<figure className="paper-fig">
+  <FigureOrchestrationPattern />
+  <figcaption><b>Figure 1.</b> 서브 에이전트에게 일을 나누는 네 패턴. (a) 감독자 LLM 이 도구 호출로 맡길 에이전트를 고른다. (b) 레벨 순서대로 돌고 같은 레벨은 병렬이다. (c) 작업 낱말과 이름, capabilities 가 겹친 수가 점수이고, 가장 높은 하나가 맡는다. 0 이면 입찰하지 않고, capabilities 가 없는 에이전트는 늘 입찰한다. (d) 에이전트들은 공유 보드의 스냅샷을 맥락으로 받아 병렬로 돌고, 오케스트레이터가 결과를 보드에 쓴다. 패턴을 쉼표로 이으면(`hierarchical,blackboard`) 앞 단계 결과가 다음 단계의 입력이 된다.</figcaption>
+</figure>
+
+`~/.ash/agents/*.yaml` 에 에이전트를 선언하면 각 에이전트가 `agent_<name>` 도구가 된다. 패턴을 고르는 `orchestrate` 도구와 `/orchestrate` 명령도 함께 생긴다. 구현은 `core/multi_agent/` 에 있다. 한 번의 오케스트레이션은 다음 순서로 돈다.
+
+1. `/orchestrate` 명령이나 `orchestrate` 도구가 패턴, 참여자, 작업을 `OrchestrationService` 에 넘긴다.
+2. 패턴이 정한 순서대로 서브 에이전트 노드가 돈다. 에이전트 사이의 결과는 작업 공유 메모리로 다음 에이전트 프롬프트에 들어간다.
+3. 쉼표로 이은 패턴이면 앞 패턴의 결과가 다음 패턴 작업의 입력이 된다. 하나라도 실패하면 멈춘다.
+4. 끝나면 부모는 "위임: ..." 을 일화로 기억하고, 작업 공유 메모리를 지운다.
+
+```mermaid
+flowchart TB
+  subgraph supervisor
+    SV[감독자 LLM] -->|도구 호출로 선택| A1[agent a]
+    SV --> A2[agent b]
+  end
+  subgraph hierarchical
+    L0[level 0 전원 병렬] --> L1[level 1, 앞 결과 전달] --> L2[level 2]
+  end
+  subgraph market
+    TK[task] -->|겹친 낱말 수로 입찰, 0 이면 빠짐| W[가장 높은 하나]
+  end
+  subgraph blackboard
+    BB[(공유 보드)] -->|스냅샷| B1[agent a] & B2[agent b] & B3[agent c]
+    B1 & B2 & B3 -->|결과| ORC[오케스트레이터]
+    ORC -->|기록| BB
+  end
+```
+
+### 서브 에이전트는 무엇인가
+
+서브 에이전트는 보통의 `AgentSession` 이고, 세 가지가 다르다.
+
+- 정의의 `system_prompt` 와 `tools` 부분집합을 쓴다. `model_override` 는 모델 이름만 바꾼다
+- 부모의 사용자 범위를 상속한다(`inherit_scope`). 그래서 사용자 프로필(`/remember` 사실)은 보이고 부모의 일화와 절차는 보이지 않는다
+- Inner Thought 와 Proactive Dialogue 가 없다
+
+부모 LLM 에게 서브 에이전트 호출은 `agent_<name>` 도구의 결과로 보인다. 내용과 맥락이 같으면 `task_id`(해시)가 같으므로 다시 돌지 않는다. 부모는 "위임: ..." 을 일화로 기억한다.
+
+### 패턴
+
+| 패턴 | 동작 |
+|---|---|
+| `supervisor` | 감독자 세션이 `agent_*` 도구를 들고 LLM 이 위임을 결정한다. 감독자 프롬프트는 `ASH_AGENTS__SUPERVISOR_PROMPT`(문자열 또는 파일 경로) |
+| `hierarchical` | `level` 순서대로 돌고, 같은 레벨은 병렬로 돈다. 앞 레벨 결과가 뒤 레벨의 컨텍스트와 작업 공유 메모리로 간다 |
+| `market` | 에이전트가 `capabilities` 로 입찰하고 점수가 가장 높은 하나가 맡는다. 점수는 작업 낱말과 이름, `capabilities` 가 겹친 수다. "정리하고" 처럼 레이블 뒤에 한글 조사나 어미만 붙은 낱말도 "정리" 와 맞는다 |
+| `blackboard` | 전원이 공유 보드 스냅샷을 보고 병렬로 돌고, 결과를 취합한다. `--promote` 면 결과를 부모 에이전트의 일화로 남긴다 |
+
+패턴을 쉼표로 이으면 파이프라인이 된다. 앞 결과가 다음 작업의 입력이 되고, 하나라도 실패하면 멈춘다.
+
+### 작업 공유 메모리
+
+오케스트레이션 한 번은 `task` 범위의 작업 기억을 가진다. 에이전트 사이의 결과는 여기로 공유되어 다음 에이전트 프롬프트에 `[작업 공유 메모리]` 블록으로 들어간다. 이 메모리는 오케스트레이션이 끝나면 지워진다. 남겨야 할 결과는 `blackboard` 의 `--promote` 로 장기 기억에 올린다.
+
+### 호출
+
+```text
+/orchestrate hierarchical 분기 보고서 작성
+/orchestrate blackboard --agents a,b --promote 시장 분석
+/orchestrate supervisor,blackboard 조사 후 정리
+/orchestrate list
+```
+
+메인 에이전트도 `orchestrate` 도구로 같은 일을 한다. 작업이 여러 전문가나 단계를 요구한다고 판단하면 LLM 이 패턴과 참여자를 고른다.
+
+### 한계
+
+- 서브 에이전트의 이벤트는 부모 세션 구독자에게 전달되지 않는다. 화면에는 부모의 `agent_<name>` 도구 호출 시작과 끝만 보인다
+- Web 모드에서 서브 에이전트가 승인이 필요한 도구를 부르면 승인 콜백이 없어 거부된다. 그래서 서브 에이전트에는 승인이 필요 없는 도구만 준다
+
+### 구현 위치
+
+왼쪽이 사용자와 화면, 가운데가 코드 모듈, 오른쪽이 저장소다. 화살표는 호출이나 데이터의 방향이다.
+
+```mermaid
+flowchart LR
+  CMD["/orchestrate 명령"] --> SVC[OrchestrationService]
+  TOOL[OrchestrateTool] --> SVC
+  NT[AgentNodeTool<br/>agent_name 도구] --> FAC
+  DEF[(에이전트 정의 파일)] --> LOAD[multi_agent_loader.py]
+  LOAD --> FAC[AgentFactory]
+  SVC --> TOP[패턴<br/>supervisor, hierarchical, market, blackboard]
+  SVC -->|쉼표로 이은 패턴| PIPE[OrchestratorPipeline<br/>앞 결과를 다음 입력으로]
+  PIPE --> TOP
+  TOP --> NODE[AgentNode<br/>서브 에이전트 세션]
+  FAC --> NODE
+  NODE --> BB[SharedBlackboard]
+```
+
+- 핵심 모듈: `core/multi_agent/`
+- 저장: 작업 공유 메모리(blackboard)
+
+## Performance Experiments
+
+같은 작업을 패턴만 바꿔 맡겼을 때 걸린 시간과 결과 전달 방식이 어떻게 달라지는지 비교했다.
+
+### 패턴별 걸린 시간과 호출 수
+
+- **질문**: 같은 작업을 패턴만 바꿔 맡기면 걸린 시간, 서브 에이전트 호출 수, 앞 단계 결과 전달이 어떻게 달라지나
+- **설정**: 실제 `Hierarchical`, `Market`, `Blackboard`, `Supervisor` 오케스트레이터와 `OrchestratorPipeline` 을 썼다. 서브 에이전트 넷(planner 레벨 0, researcher 와 writer 레벨 1, reviewer 레벨 2)은 0.2초 쉬고 정해진 글을 돌려주는 가짜다. 감독자는 실제 `AgentSession` 에 한 번 0.2초 걸리는 대본 모델을 붙였다. `supervisor` 는 한 턴에 넷을 함께 부르고, `supervisor_serial` 은 한 턴에 하나씩 부른다. 작업은 "분기 보고서 작성: 시장 조사 후 정리하고 검토", 5회 평균이다
+- **결과**:
+
+<figure className="paper-fig">
+  <FigureExpOrchestration />
+  <figcaption><b>Figure 2.</b> 걸린 시간은 차례로 기다리는 단계 수에 비례한다. 감독자는 자기 모델 호출이 단계로 더해지고, market 은 한 에이전트만 불러 가장 짧다.</figcaption>
+</figure>
+
+| 패턴 | 걸린 시간(5회 평균) | 서브 에이전트 호출 | 감독 모델 호출 | 앞 결과를 받은 호출 |
+|---|---|---|---|---|
+| supervisor (한 턴에 함께) | 0.619초 | 4 | 2 | 0 |
+| supervisor (한 턴에 하나씩) | 1.829초 | 4 | 5 | 0 |
+| hierarchical | 0.604초 | 4 | 0 | 3 |
+| market | 0.201초 | 1 (writer) | 0 | 0 |
+| blackboard | 0.201초 | 4 | 0 | 0 |
+| hierarchical,blackboard | 0.806초 | 8 | 0 | 7 |
+
+- **실험에서 찾아 고친 것**: 처음 쟀을 때 market 에서는 researcher, writer, reviewer 가 모두 1점으로 같아 먼저 등록된 researcher 가 맡았다. writer 의 능력 "정리" 가 작업의 "정리하고" 와 조사 때문에 맞지 않았다. 레이블 뒤에 한글 조사나 어미만 붙은 낱말도 맞추게 고친 뒤 writer 가 2점으로 맡는다
+- **해석**: 빠르게 끝내야 하면 blackboard, 앞 단계 결과를 이어 써야 하면 hierarchical 이나 파이프라인을 고른다. 감독자는 판단이 유연한 대신 자기 모델 호출만큼 느려진다. 프레임워크가 더한 시간은 5ms 이하였다
+- **한계**: 감독 모델은 대본대로 움직여 실제 모델의 위임 판단과 호출 수는 재지 않았다. 결과의 품질도 재지 않았다. market 입찰 점수는 낱말 겹침이라 능력 이름을 짧은 낱말로 적어야 맞는다
+- **재현**: `uv run python scripts/experiments/orchestration_patterns.py`

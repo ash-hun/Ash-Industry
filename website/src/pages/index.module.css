@@ -1,0 +1,119 @@
+/* 랜딩 전용. 색은 custom.css 의 --ash-* 토큰만 쓴다 */
+
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 16px 5rem;
+}
+
+.hero {
+  padding: 4.5rem 0 2.5rem;
+  text-align: center;
+}
+
+/* 엠블럼의 주황 코어만 빛나게 한다. 광원 색은 --ash-glow(라이트에서는 투명) */
+.emblem {
+  display: block;
+  height: 96px;
+  width: auto;
+  margin: 0 auto 1.5rem;
+  filter: drop-shadow(0 0 18px var(--ash-glow));
+}
+
+.label {
+  margin: 0 0 0.75rem;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  color: var(--ash-primary);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: clamp(2.2rem, 6vw, 3.6rem);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 0 24px var(--ash-glow);
+}
+
+.lead {
+  max-width: 38rem;
+  margin: 1.25rem auto 0;
+  font-size: 1.15rem;
+  color: var(--ash-text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.shot {
+  display: block;
+  width: 100%;
+  max-width: 960px;
+  margin: 3rem auto 0;
+  border: 1px solid var(--ash-hairline);
+  border-radius: 8px;
+  box-shadow: 0 0 40px var(--ash-primary-low);
+}
+
+.section {
+  margin-top: 3.5rem;
+}
+
+.sectionTitle {
+  margin-bottom: 1.25rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ash-text);
+}
+
+.gridThree,
+.gridFive {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 720px) {
+  .gridThree {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .gridFive {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--ash-hairline);
+  border-radius: 8px;
+  background: var(--ash-surface);
+  color: var(--ash-text);
+  transition: border-color 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--ash-primary);
+  color: var(--ash-text);
+  text-decoration: none;
+}
+
+.cardTitle {
+  font-weight: 700;
+}
+
+.cardBody {
+  font-size: 0.92rem;
+  color: var(--ash-text-secondary);
+}

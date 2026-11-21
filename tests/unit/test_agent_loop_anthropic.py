@@ -1,0 +1,130 @@
+"""agent_loop: Anthropic 프로바이더가 직전 메시지의 마지막 블록에 캐시 지점을 넣어 보내는지 검증한다."""
+
+import pytest
+from typing import Any
+from types import SimpleNamespace
+
+from ash_industry.model_layer.model_types import (
+    AssistantMessage,
+    LLMContext,
+    Message,
+    ModelConfig,
+    TextContent,
+    UserMessage,
+)
+from ash_industry.model_layer.providers.anthropic import AnthropicProvider
+from ash_industry.model_layer.providers import anthropic as anthropic_mod
+
+CACHE = {"type": "ephemeral"}
+
+
+class _FakeStream:
+    async def __aenter__(self) -> "_FakeStream":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def __aiter__(self) -> "_FakeStream":
+        return self
+
+    async def __anext__(self) -> Any:
+        raise StopAsyncIteration
+
+    async def get_final_message(self) -> Any:
+        return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=1), stop_reason="end_turn")
+
+
+async def _sent_messages(monkeypatch: pytest.MonkeyPatch, messages: list[Message]) -> list[dict[str, Any]]:
+    sent: dict[str, Any] = {}
+
+    def stream(**kwargs: Any) -> _FakeStream:
+        sent.update(kwargs)
+        return _FakeStream()
+
+    def fake_client(**_kwargs: Any) -> Any:
+        return SimpleNamespace(messages=SimpleNamespace(stream=stream))
+
+    monkeypatch.setattr(anthropic_mod.anthropic, "AsyncAnthropic", fake_client)
+    model = ModelConfig(provider="anthropic", model="claude", api_key="k")
+    [ev async for ev in AnthropicProvider().stream(model, LLMContext(messages=messages))]
+    return sent["messages"]
+
+
+def _text(text: str, cache: bool = False) -> dict[str, Any]:
+    return {"type": "text", "text": text, **({"cache_control": CACHE} if cache else {})}
+
+
+@pytest.mark.parametrize(
+    ("messages", "expected"),
+    [
+        ([UserMessage(content="hello")], [{"role": "user", "content": "hello"}]),
+        (
+            [
+                UserMessage(content=[TextContent(text="hi")]),
+                AssistantMessage(content=[TextContent(text="hello")]),
+                UserMessage(content=[TextContent(text="again")]),
+            ],
+            [
+                {"role": "user", "content": [_text("hi")]},
+                {"role": "assistant", "content": [_text("hello", cache=True)]},
+                {"role": "user", "content": [_text("again")]},
+            ],
+        ),
+        (
+            [UserMessage(content="first"), UserMessage(content="second")],
+            [{"role": "user", "content": [_text("first", cache=True)]}, {"role": "user", "content": "second"}],
+        ),
+        (
+            [UserMessage(content=[]), UserMessage(content="current")],
+            [{"role": "user", "content": []}, {"role": "user", "content": "current"}],
+        ),
+    ],
+    ids=["single_message_untouched", "previous_turn_cached", "string_content_listed", "empty_content_untouched"],
+)
+async def test_stream_caches_history_up_to_previous_message(monkeypatch, messages, expected):
+    assert await _sent_messages(monkeypatch, messages) == expected
+
+
+async def test_stream_does_not_send_temperature_the_sdk_rejects(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: dict[str, Any] = {}
+
+    def stream(**kwargs: Any) -> _FakeStream:
+        sent.update(kwargs)
+        return _FakeStream()
+
+    client = SimpleNamespace(messages=SimpleNamespace(stream=stream))
+    monkeypatch.setattr(anthropic_mod.anthropic, "AsyncAnthropic", lambda **_kw: client)
+    model = ModelConfig(provider="anthropic", model="claude", api_key="k", temperature=0.0)
+
+    [ev async for ev in AnthropicProvider().stream(model, LLMContext(messages=[UserMessage(content="hi")]))]
+
+    assert "temperature" not in sent and sent["model"] == "claude"
+
+
+@pytest.mark.parametrize(
+    ("system_prompt", "suffix", "expected"),
+    [
+        ("고정", "[내적 사고] 바뀜", [_text("고정", cache=True), _text("[내적 사고] 바뀜")]),
+        ("고정", None, [_text("고정", cache=True)]),
+        (None, "덧붙임만", [_text("덧붙임만")]),
+        (None, None, None),
+    ],
+    ids=["suffix_uncached_after_cached_base", "base_only", "suffix_only", "no_system"],
+)
+async def test_stream_caches_only_the_fixed_system_block(monkeypatch, system_prompt, suffix, expected):
+    sent: dict[str, Any] = {}
+
+    def stream(**kwargs: Any) -> _FakeStream:
+        sent.update(kwargs)
+        return _FakeStream()
+
+    monkeypatch.setattr(
+        anthropic_mod.anthropic, "AsyncAnthropic", lambda **_k: SimpleNamespace(messages=SimpleNamespace(stream=stream))
+    )
+    model = ModelConfig(provider="anthropic", model="claude", api_key="k")
+    context = LLMContext(messages=[UserMessage(content="hi")], system_prompt=system_prompt, system_suffix=suffix)
+
+    [ev async for ev in AnthropicProvider().stream(model, context)]
+
+    assert sent.get("system") == expected

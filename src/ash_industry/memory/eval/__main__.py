@@ -1,0 +1,162 @@
+"""[memory] 메모리 평가 CLI로, --suite 는 기능별 스위트를, --benchmark 와 --path 는 외부 벤치마크를 돌린다."""
+
+import sys
+import json
+import asyncio
+import argparse
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from ash_industry.memory.eval.runner import (
+    SUITES,
+    EvalReport,
+    format_report,
+    load_retention_suites,
+    load_suites,
+    merge,
+    run,
+    run_faithfulness_suite,
+    run_retention,
+)
+from ash_industry.memory.eval.target import EvalTarget
+from ash_industry.memory.eval.benchmark import MODES
+
+if TYPE_CHECKING:
+    from ash_industry.memory.consolidation.semantic_extract import FactExtractor
+    from ash_industry.memory.consolidation.compaction import Summarizer
+    from ash_industry.model_layer.model_types import ModelConfig
+    from ash_industry.memory.eval.faithfulness import FactJudge
+    from ash_industry.model_layer.embeddings import Embedder
+    from ash_industry.memory.eval.benchmark import Judge
+
+
+async def _run_all(names: list[str], summarizer: str = "extractive", judge: str | None = None) -> EvalReport:
+    reports: list[EvalReport] = []
+    target = EvalTarget()
+    store_cases = load_suites(names)
+    if store_cases:
+        reports.append(await run(store_cases, target))
+    retention_cases = load_retention_suites(names)
+    if retention_cases:
+        reports.append(await run_retention(retention_cases, target))
+    llm_summarizer_fn: Summarizer | None = None
+    llm_judge_fn: FactJudge | None = None
+    if summarizer == "llm" or judge == "llm":
+        from ash_industry.memory.eval.faithfulness import llm_fact_judge
+        from ash_industry.memory.consolidation import llm_summarizer
+
+        model = _settings_model()
+        llm_summarizer_fn = llm_summarizer(model) if summarizer == "llm" else None
+        llm_judge_fn = llm_fact_judge(model) if judge == "llm" else None
+    faithfulness = await run_faithfulness_suite(names, llm_summarizer_fn, llm_judge_fn)
+    if faithfulness is not None:
+        reports.append(faithfulness)
+    return merge(*reports)
+
+
+def _settings_model() -> "ModelConfig":
+    from ash_industry.model_layer.model_types import ModelConfig
+    from ash_industry.ash_config import get_settings
+
+    llm = get_settings().llm
+    return ModelConfig(
+        provider=llm.provider, model=llm.model,
+        api_key=llm.api_key.get_secret_value() if llm.api_key else None, base_url=llm.base_url,
+    )
+
+
+async def _run_benchmark(args: argparse.Namespace) -> int:
+    from ash_industry.memory.eval.benchmark import format_benchmark, run_benchmark, sample
+    from ash_industry.memory.stores.in_memory import InMemoryItemStore
+    from ash_industry.memory.memory_service import MemoryService
+    from ash_industry.memory.eval.adapters import LOADERS
+
+    questions = sample(LOADERS[args.benchmark](Path(args.path)), args.limit, args.seed)
+
+    embedder: Embedder | None
+    if args.embedder == "fake":
+        from ash_industry.memory.eval.fake_embedder import FakeEmbedder
+
+        embedder = FakeEmbedder()
+    else:
+        from ash_industry.model_layer.embeddings import build_embedder
+        from ash_industry.ash_config import get_settings
+
+        mcfg = get_settings().memory
+        key = mcfg.embedding_api_key or get_settings().llm.api_key
+        embedder = build_embedder(
+            mcfg.embedding_provider, model=mcfg.embedding_model, dimensions=mcfg.embedding_dimensions,
+            api_key=key.get_secret_value() if key else None, base_url=mcfg.embedding_base_url,
+        )
+
+    model: ModelConfig | None = None
+    if args.extract == "llm" or args.judge == "llm":
+        model = _settings_model()
+
+    extractor: FactExtractor | None = None
+    if args.extract == "llm":
+        from ash_industry.memory.consolidation.semantic_extract import llm_fact_extractor
+
+        assert model is not None  # extract == "llm" 이면 바로 위에서 채웠다
+        extractor = llm_fact_extractor(model)
+
+    def memory_factory() -> MemoryService:
+        return MemoryService(InMemoryItemStore(), extractor=extractor, embedder=embedder)
+
+    judge: Judge | None = None
+    if args.judge == "llm":
+        from ash_industry.memory.eval.judge import llm_judge
+
+        assert model is not None  # judge == "llm" 이면 위에서 채웠다
+        judge = llm_judge(model)
+    elif args.judge == "contains":
+        from ash_industry.memory.eval.judge import contains_judge
+
+        judge = contains_judge()
+
+    report = await run_benchmark(
+        args.benchmark, questions, memory_factory, k=args.k, mode=args.mode, judge=judge, embedder=embedder,
+        budget=args.budget,
+    )
+    print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2) if args.json else format_benchmark(report))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="ash_industry.memory.eval")
+    parser.add_argument("--suite", default="all", choices=("all", *SUITES))
+    parser.add_argument("--benchmark", choices=("longmemeval", "locomo", "personamem", "minteval"))
+    parser.add_argument("--path", help="벤치마크 원본 JSON 경로 (레포 밖, 예: ~/.ash/benchmarks/longmemeval_s.json)")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--mode", default="raw", choices=MODES,
+                        help="rag: 원문 조각 코사인 top-k. raw: 턴마다 항목 하나. turns: 턴 일화와 공고화. "
+                             "turns+src: 사실의 출처 턴과 공동 재순위. turns+excerpt: 사실 아래 출처 발췌")
+    parser.add_argument("--budget", type=int, default=None,
+                        help="모델에 보일 기억의 글자 예산. 주면 k 대신 이 예산으로 잘라 비교군의 노출량을 맞춘다")
+    parser.add_argument("--extract", default=None, choices=("llm",), help="turns 모드의 공고화에서 사실 추출")
+    parser.add_argument("--embedder", default="fake", choices=("fake", "config"))
+    parser.add_argument("--judge", default=None, choices=("llm", "contains"))
+    parser.add_argument("--summarizer", default="extractive", choices=("extractive", "llm"),
+                        help="faithfulness 스위트의 요약기. extractive 는 LLM 없는 기준선")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.benchmark:
+        if not args.path:
+            parser.error("--benchmark needs --path")
+        return asyncio.run(_run_benchmark(args))
+
+    names = list(SUITES) if args.suite == "all" else [args.suite]
+    report = asyncio.run(_run_all(names, args.summarizer, args.judge))
+    if args.json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(format_report(report, args.verbose))
+    return 0 if report.all_passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

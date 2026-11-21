@@ -1,0 +1,193 @@
+"""[ui] ws 메시지 하나가 띄우는 비동기 작업(프롬프트, STT, TTS, 짧은 답 분류)과 피드백 중복 판정."""
+
+import time
+import base64
+import contextlib
+from fastapi import WebSocket
+from typing import TYPE_CHECKING, Any
+
+from ash_industry.voice.voice_service import ENGLISH_LANG, is_ambient, is_english, is_unclear
+from ash_industry.voice.english import FALLBACK_LINE, Translate, split_sentences
+from ash_industry.app.agent_profile import MAIN_AGENT_ID
+from ash_industry.common.logger import get_logger
+
+if TYPE_CHECKING:
+    from ash_industry.agent_layer.thought.reply import ReplyClassifier
+    from ash_industry.core.focus.focus_service import FocusService
+    from ash_industry.core.focus.focus_types import FocusCommand
+    from ash_industry.ui.web.adapter import PerConnectionAdapter
+    from ash_industry.voice.voice_service import VoiceService
+    from ash_industry.core.session import AgentSession
+    from ash_industry.core.notify import Notify
+
+# 잘 못 들었을 때 되묻는 말. main 은 영어 목소리일 수 있어 영어로 둔다. 설정 voice.english_unclear 로 바꾼다
+UNCLEAR_REPLY_MAIN = "I'm sorry, I didn't catch that."
+UNCLEAR_REPLY = "잘 못 들었어요. 한 번 더 말씀해 주세요."
+
+logger = get_logger(__name__)
+
+
+async def notify_quietly(notify: "Notify | None", payload: dict[str, Any] | None) -> None:
+    """밖으로 알린다. 알림 채널이 실패해도 읽기와 대화는 계속된다."""
+    if notify is None or payload is None:
+        return
+    with contextlib.suppress(Exception):
+        await notify(payload)
+
+
+async def run_prompt(
+    session: "AgentSession", adapter: "PerConnectionAdapter", text: str, credentials: dict[str, str]
+) -> None:
+    try:
+        # 사람이 화면에서 기다리는 턴이라 오래 걸리면 선응답 뒤 뒤에서 이어 돈다
+        await session.prompt(text, credentials=credentials, detach=True)
+    except Exception as exc:
+        await adapter.show_error(str(exc))
+
+
+async def run_focus(
+    session: "AgentSession",
+    adapter: "PerConnectionAdapter",
+    focus: "FocusService",
+    command: "FocusCommand",
+    credentials: dict[str, str],
+) -> None:
+    """/focus 명령을 처리해 안내를 한 메시지로 보이고, 시작이면 작업을 메인 에이전트에 이어 보낸다."""
+    try:
+        feedback, follow_up = await focus.handle(command, session)
+    except Exception as exc:
+        await adapter.show_error(f"Focus 오류: {exc}")
+        return
+    await adapter.send({"type": "agent_start"})
+    await adapter.send({"type": "stream_delta", "text": feedback})
+    # 이어서 메인 에이전트가 돌면 화면이 음성 요청 표시와 입력 잠금을 그대로 두게 알린다
+    await adapter.send({"type": "agent_end", "continues": bool(follow_up)})
+    if follow_up:
+        await run_prompt(session, adapter, follow_up, credentials)
+
+
+def unclear_reply(agent_id: str, main_line: str = UNCLEAR_REPLY_MAIN) -> str:
+    return (main_line or UNCLEAR_REPLY_MAIN) if agent_id == MAIN_AGENT_ID else UNCLEAR_REPLY
+
+
+async def run_stt(
+    ws: WebSocket, voice_service: "VoiceService", audio_b64: str, sample_rate: int, agent_id: str = MAIN_AGENT_ID,
+    command_max_sec: float = 0.0, command_max_chars: int = 0, unclear_main: str = UNCLEAR_REPLY_MAIN,
+) -> None:
+    """base64 오디오를 전사해 결과를 보낸다. 잘 못 들었으면 에이전트에 넘기지 않고 되묻는 말을 읽어 준다.
+
+    주변 대화(너무 긴 녹음이나 글)는 `ambient` 로만 알리고 아무 말도 하지 않는다. 회의 중에 끼어들지 않으려는 것이다.
+    """
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+        heard = await voice_service.transcribe_scored(audio_bytes, sample_rate)
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            await ws.send_json({"type": "voice_stt_result", "text": "", "error": str(exc)})
+        return
+    # 기준값을 실제 기록으로 맞추려고 남긴다
+    logger.info(
+        f"[Voice] stt no_speech={heard.no_speech_prob:.2f} logprob={heard.avg_logprob:.2f}"
+        f" sec={heard.duration_sec:.1f} text={heard.text!r}"
+    )
+    if is_ambient(heard, command_max_sec, command_max_chars):
+        logger.info(f"[Voice] ambient speech ignored sec={heard.duration_sec:.1f} chars={len(heard.text)}")
+        await ws.send_json({"type": "voice_stt_result", "text": "", "ambient": True, "heard": heard.text[:80]})
+        return
+    if not is_unclear(heard):
+        await ws.send_json({"type": "voice_stt_result", "text": heard.text})
+        return
+    # 문장이 하나도 안 나온 녹음은 소음만 들어온 것이다. 오류로 보이거나 되묻으면 소음마다 화면이 어지럽다
+    if not heard.text.strip():
+        await ws.send_json({"type": "voice_stt_result", "text": "", "silent": True})
+        return
+    await ws.send_json({"type": "voice_stt_result", "text": "", "unclear": True, "heard": heard.text})
+    await run_tts(ws, voice_service, unclear_reply(agent_id, unclear_main), "ko")
+
+
+async def run_tts(
+    ws: WebSocket,
+    voice_service: "VoiceService",
+    text: str,
+    lang: str,
+    request_id: object = None,
+    translate: "Translate | None" = None,
+    stream: bool = False,
+    fallback: str = FALLBACK_LINE,
+) -> None:
+    """서버 TTS 결과를 보낸다. 브라우저 TTS 프로바이더면 빈 data 와 원문을 돌려 화면이 직접 읽게 한다.
+
+    translate 가 있으면 소리로만 영어로 옮겨 영어 TTS 로 읽는다. 옮기지 못하면 영어 고정 문장을 읽는다.
+    stream 이면 문장마다 소리를 조각으로 나오는 대로 `more: true` 를 붙여 보내고, 끝에 빈 `more: false` 로 닫는다.
+    화면은 첫 조각부터 읽는다. 소리가 하나도 없으면 끝 메시지에 글을 실어 브라우저가 읽게 한다.
+    """
+    try:
+        started = time.perf_counter()
+        if translate is not None:
+            text, lang = (await translate(text)) or fallback or FALLBACK_LINE, ENGLISH_LANG
+        translated = time.perf_counter()
+        if not stream:
+            audio_bytes = await voice_service.synthesize(text, lang)
+            await ws.send_json(_tts_audio(text, request_id, audio_bytes))
+            return
+        parts = split_sentences(text) if is_english(text) else [text]
+        chunks = 0
+        for part in parts:
+            async for audio_bytes in voice_service.synthesize_stream(part, lang):
+                if chunks == 0:
+                    # 어느 단계가 첫 소리를 늦추는지 실제 기록으로 보려고 남긴다
+                    logger.info(
+                        f"[Voice] tts translate={translated - started:.2f}s "
+                        f"first_chunk={time.perf_counter() - started:.2f}s parts={len(parts)} words={len(text.split())}"
+                    )
+                chunks += 1
+                await ws.send_json({**_tts_audio(part, request_id, audio_bytes), "more": True})
+        logger.info(f"[Voice] tts done={time.perf_counter() - started:.2f}s chunks={chunks}")
+        await ws.send_json({**_tts_audio("" if chunks else text, request_id, b""), "more": False})
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            await ws.send_json({"type": "error", "message": f"TTS 오류: {exc}"})
+
+
+def _tts_audio(text: str, request_id: object, audio_bytes: bytes) -> dict[str, object]:
+    """text 는 실제로 읽은 글이다. 영어로 옮겼으면 그 영어다. 소리가 비면 화면이 그 글을 브라우저로 읽는다."""
+    reply: dict[str, object] = {"type": "voice_tts_audio", "data": "", "text": text, "id": request_id}
+    if audio_bytes:
+        reply.update(data=base64.b64encode(audio_bytes).decode(), mime="audio/wav")
+    return reply
+
+
+def first_feedback(seen: set[str], message_id: object) -> bool:
+    """이 연결에서 처음 받는 🔔 피드백이면 True. id 가 없으면(옛 화면) 매번 True."""
+    if not isinstance(message_id, str) or not message_id:
+        return True
+    if message_id in seen:
+        return False
+    seen.add(message_id)
+    return True
+
+
+async def run_reply_classify(
+    ws: WebSocket,
+    classifier: "ReplyClassifier | None",
+    session: "AgentSession",
+    feedback_ids: set[str],
+    msg: dict[str, object],
+) -> None:
+    """짧은 답을 분류해 돌려준다. 🔔 피드백이면 여기서 학습까지 하고, 승인은 화면이 답을 보낸다."""
+    from ash_industry.agent_layer.thought.reply import FALLBACK
+
+    kind = msg.get("kind")
+    if kind != "feedback" and kind != "approval":
+        return
+    text = str(msg.get("text", ""))
+    context = str(msg.get("context", ""))
+    has_always = bool(msg.get("has_always", False))
+    if classifier is None:
+        verdict = FALLBACK[kind]
+    else:
+        verdict = await classifier.classify(kind, text, context, has_always)
+    if kind == "feedback" and verdict in ("accept", "dismiss") and first_feedback(feedback_ids, msg.get("id")):
+        await session.record_feedback(verdict == "accept")
+    with contextlib.suppress(Exception):
+        await ws.send_json({"type": "reply_classified", "kind": kind, "id": msg.get("id"), "verdict": verdict})

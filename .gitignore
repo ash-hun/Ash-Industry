@@ -47,7 +47,6 @@ nosetests.xml
 coverage.xml
 *.cover
 *.py.cover
-*.lcov
 .hypothesis/
 .pytest_cache/
 cover/
@@ -95,7 +94,7 @@ ipython_config.py
 #   install all needed dependencies.
 # Pipfile.lock
 
-# uv
+# UV
 #   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
@@ -123,14 +122,13 @@ ipython_config.py
 # pixi.lock
 #   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
 #   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi/*
-!.pixi/config.toml
+.pixi
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
 
 # Celery stuff
-celerybeat-schedule*
+celerybeat-schedule
 celerybeat.pid
 
 # Redis
@@ -159,9 +157,6 @@ ENV/
 env.bak/
 venv.bak/
 
-# Conda environments
-conda-meta/
-
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -169,7 +164,7 @@ conda-meta/
 # Rope project settings
 .ropeproject
 
-# mkdocs/Zensical documentation
+# mkdocs documentation
 /site
 
 # mypy
@@ -200,10 +195,10 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore that
-#   can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, you
-#   could uncomment the following to ignore the entire vscode folder
+#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
+#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#   you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
@@ -221,3 +216,31 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Default Project Env
+_reference/
+CLAUDE.md
+memory-lake/
+develop_plan.md
+
+# Claude Code local settings (per-machine, not tracked)
+.claude/
+# 설계, 조사 문서는 로컬에서만 관리한다
+
+# docs/ 는 개인 메모가 섞여 있어 통째로 뺀다. 명세 세 개만 레포에 둔다 (CLAUDE.md)
+docs/*
+!docs/features.md
+!docs/api_spec.md
+!docs/view_spec.md
+
+# 학습한 음성 모델(TTS, 문구, 웨이크워드). 비상업 라이선스라 저장소에 올리지 않는다. 받는 법은 website/docs/concepts/conversation/voice.md
+/models/
+
+# Electron 셸 의존성. desktop/package-lock.json 이 정본이다
+desktop/node_modules/
+# electron-builder 결과(dmg, zip, .app). GitHub Release 가 정본이다
+desktop/dist/
+
+# MCP 주기 조회 선언은 개인 설정(라벨, 계정)이라 저장소에 올리지 않는다. *.yaml.example 만 올린다
+mcp/external_sources/*.yaml
+.DS_Store

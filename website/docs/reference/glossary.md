@@ -1,0 +1,34 @@
+---
+sidebar_position: 3
+title: 전체 용어집
+---
+
+# 전체 용어집
+
+문서와 화면에서 반복해서 나오는 이름을 한눈에 찾아볼 수 있도록 정리한다. 이름이나 화면에 보이는 기호(💭, 💬, 🔔)로 줄을 찾고, 더 알고 싶으면 마지막 칸의 문서로 넘어간다.
+
+| 이름 | 화면 기호 | 뜻 | 자세히 |
+|---|---|---|---|
+| 내적 사고 (Inner Thought) | 💭 | main 이 메인 응답과 따로 LLM 을 한 번 더 불러 판단을 만드는 일. 요청마다 한 번(Thought Router 가 direct 로 정하면 건너뛴다), 성찰 때 한 번 돈다 | [Inner Thought](../concepts/conversation/inner-thought.md) |
+| 사고 프레임 | | 내적 사고 한 번의 결과. 해석, 결정, 확신도, 먼저 할 말, 행동 후보를 담은 구조화된 판단(`ThoughtFrame`) | [Inner Thought → 사고 프레임](../concepts/conversation/inner-thought.md#사고-프레임) |
+| 사고 모델 | | 내적 사고에 쓰는 LLM. 메인 모델과 따로 작은 모델을 둘 수 있다 | [서비스 설정 값](./configuration.md) |
+| Dual channel | 💬 | 오래 걸릴 요청이면 짧은 말을 먼저 하고 메인 응답은 뒤에서 처리하는 방식 | [Dual channel](../concepts/conversation/proactive.md#dual-channel) |
+| filler | 💬 | Dual channel 에서 먼저 하는 짧은 말. "잠깐만요, 확인할게요" 같은 것 | [Dual channel](../concepts/conversation/proactive.md#dual-channel) |
+| 성찰 | | 요청이 없는 시간에 주기적으로 도는 내적 사고. 먼저 말할 거리가 있는지 본다 | [Proactive Dialogue](../concepts/conversation/proactive.md) |
+| 먼저 건네는 말 | 🔔 | 성찰 끝에 가치가 분명할 때만 main 이 먼저 보내는 말 | [Proactive Dialogue](../concepts/conversation/proactive.md) |
+| 피드백 학습 (Process Pattern Analysis) | | 먼저 건네는 말에 대한 수락, 무시, 무응답으로 다음 발화 기준(임계치)을 움직이는 일 | [Process Pattern Analysis](../concepts/conversation/proactive.md#피드백-학습) |
+| Mode | | Web HUD 에서 일하는 방식을 바꾸는 모드. 지금은 Focus 하나이고, 음성에는 모드 전환이 없다 | [Mode](../concepts/mode/index.md) |
+| 말로 이어 가는 대화 | | 말로 시작한 요청(구체 클릭, 웨이크워드, 전역 단축키)에서 열리는 대화. 답과 🔔 를 읽은 뒤 다시 듣고, 말이 없거나 타이핑하거나 읽기를 멈추면 끝난다 | [Voice Interface](../concepts/conversation/voice.md#말로-이어-가는-대화) |
+| Focus | | 작업 하나에 조사, 기록, 분석, 진행 sub-agent 넷을 붙이는 모드. `/focus <작업>` | [Focus Mode](../concepts/mode/focus-mode.md) |
+| 약속 (open loop) | | 대화에서 흘린 약속이나 끝내지 못한 일. 끝나거나 거두거나 기한이 지나면 닫힌다 | [Open loop](../concepts/conversation/open-loop.md) |
+| 스케줄 (Scheduling) | | 정한 시각이나 주기에 도는 알림(reminder)이나 작업(task) | [Scheduling](../concepts/conversation/scheduling.md) |
+| 외부 이벤트 (MCP Events) | | MCP 도구를 주기적으로 불러 얻은 새 항목. 성찰의 재료가 된다 | [MCP Events](../concepts/conversation/mcp.md) |
+| 승인 | | 위험할 수 있는 도구를 실행하기 전에 사람에게 묻는 일 | [Tool & Approve System](../concepts/conversation/tools-and-approval.md) |
+| 승인 기억 | | 승인 화면의 `ALWAYS` 로 남긴 명령 패턴. 다음부터 같은 패턴은 묻지 않는다 | [Tool & Approve System → 승인 기억](../concepts/conversation/tools-and-approval.md#승인-기억) |
+| 절차 학습 | | 같은 종류로 세 번 성공한 작업을 절차 초안으로 남기고, 승인하면 절차 도구로 쓰는 일 | [Tool & Approve System → 절차 학습](../concepts/conversation/tools-and-approval.md#절차-학습) |
+| 작업 패턴 | | 사용자가 알려 준 일하는 방식. 에이전트마다 따로 기억한다 | [Memory Management → 작업 패턴](../concepts/memory.md#작업-패턴) |
+| 사용자 모델 | | 기억에서 뽑은 사용자 성향. 모든 에이전트가 같이 읽는다 | [Memory Management → 사용자 모델과 저널](../concepts/memory.md#사용자-모델과-저널) |
+| 세션 (Sessions) | | 대화 한 줄기. 만들 때 에이전트가 정해지고 바뀌지 않는다 | [Sessions](../concepts/conversation/sessions.md) |
+| 최상위 에이전트 (팀 에이전트) | | main 과 같은 층에서 자기 세션, 기억, 승인 규칙, 색을 가진 에이전트. `examples/team/scribe.yaml` 같은 정의 파일 하나로 늘린다 | [Multi agent Orchestration](../concepts/multi-agent-orchestration/index.md) |
+| 서브 에이전트 | | 부모 턴 안에서 잠깐 도는 도구 같은 에이전트. 최상위 에이전트와 다르다 | [Orchestration Pattern](../concepts/multi-agent-orchestration/orchestration-pattern.md) |
+| HUD | | 브라우저 화면(Web HUD). 리액터 구체를 가운데 두고 카드를 두른다 | [Web HUD 사용가이드](../start/web-hud.md) |

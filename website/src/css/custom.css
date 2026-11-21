@@ -1,0 +1,577 @@
+/* 문서 색은 Ash Industry 브랜드(assets/logo, HUD 기본 팔레트 styles.css)를 토큰으로 옮긴 것이다. 규칙은 토큰만 참조한다. */
+
+/* 라이트 토큰. 글자로 쓰는 색은 흰 배경에서 4.5:1 을 넘게 골랐다(primary 5.18, team 5.08, danger 6.57).
+   브랜드 주황 #d9481a 는 흰 배경에서 4.29 라 글자용으로 한 단계 어둡게 쓴다 */
+:root {
+  --ash-bg: #edeeef;
+  --ash-surface: #ffffff;
+  --ash-text: #1b1c1e;
+  --ash-text-secondary: #55595f;
+  --ash-primary: #c2410c;
+  --ash-primary-low: rgba(194, 65, 12, 0.08);
+  --ash-primary-high: #9a3412;
+  --ash-accent: #c2410c;
+  --ash-danger: #b42318;
+  --ash-warning: #a0611a;
+  --ash-agent-main: #1b1c1e;
+  --ash-agent-team: #4d7a2a;
+  --ash-hairline: rgba(27, 28, 30, 0.14);
+  --ash-glow: transparent;
+
+  --ifm-color-primary: var(--ash-primary);
+  --ifm-color-primary-dark: #af3b0b;
+  --ifm-color-primary-darker: #a5370a;
+  --ifm-color-primary-darkest: #882d08;
+  --ifm-color-primary-light: #c85424;
+  --ifm-color-primary-lighter: #cb5e31;
+  --ifm-color-primary-lightest: #d47a55;
+  --ifm-color-danger: var(--ash-danger);
+  --ifm-color-warning: var(--ash-warning);
+
+  --ifm-background-color: var(--ash-bg);
+  --ifm-background-surface-color: var(--ash-surface);
+  --ifm-font-color-base: var(--ash-text);
+  --ifm-color-content-secondary: var(--ash-text-secondary);
+  --ifm-link-hover-color: var(--ash-primary-high);
+  --ifm-code-background: var(--ash-primary-low);
+  --ifm-menu-color-background-active: var(--ash-primary-low);
+  --ifm-toc-border-color: var(--ash-hairline);
+  --ifm-hr-background-color: var(--ash-hairline);
+  --ifm-table-border-color: var(--ash-hairline);
+  --ifm-table-stripe-background: var(--ash-primary-low);
+
+  /* Pretendard 는 한글과 라틴을 한 폰트로 그려 한 문장 안에서 글꼴이 섞이지 않는다 */
+  --ifm-font-family-base: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  --ifm-heading-font-family: var(--ifm-font-family-base);
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ifm-font-size-base: 106.25%;
+  --ifm-line-height-base: 1.7;
+  --ifm-code-font-size: 88%;
+  --ifm-heading-font-weight: 700;
+  --docusaurus-highlighted-code-line-bg: var(--ash-primary-low);
+}
+
+/* 다크 토큰. HUD 기본 팔레트(차콜 배경, 밝은 회색 글자, 주황 코어)를 그대로 쓴다. 주황은 배경에서 5.66:1 */
+[data-theme='dark'] {
+  --ash-bg: #14161a;
+  --ash-surface: #1b1c1e;
+  --ash-text: #e6e8ea;
+  --ash-text-secondary: #9a9ea4;
+  --ash-primary: #f0642d;
+  --ash-primary-low: rgba(240, 100, 45, 0.1);
+  --ash-primary-high: #f4926c;
+  --ash-accent: #ffb38a;
+  --ash-danger: #f05f5f;
+  --ash-warning: #f0b35f;
+  --ash-agent-main: #e6e8ea;
+  --ash-agent-team: #97bc62;
+  --ash-hairline: rgba(230, 232, 234, 0.12);
+  --ash-glow: rgba(240, 100, 45, 0.4);
+
+  --ifm-color-primary: var(--ash-primary);
+  --ifm-color-primary-dark: #ee5418;
+  --ifm-color-primary-darker: #e74c11;
+  --ifm-color-primary-darkest: #be3f0e;
+  --ifm-color-primary-light: #f27442;
+  --ifm-color-primary-lighter: #f27b4c;
+  --ifm-color-primary-lightest: #f4926c;
+
+  --ifm-navbar-background-color: rgba(20, 22, 26, 0.78);
+  --ifm-footer-background-color: #111316;
+  --ifm-menu-color-background-hover: rgba(230, 232, 234, 0.05);
+  --ifm-table-stripe-background: rgba(230, 232, 234, 0.025);
+}
+
+html,
+body {
+  background: var(--ash-bg);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* HUD 화면처럼 위쪽 회색 광원과 아래쪽 주황 성운을 깐다. 성운색은 이 배경에만 쓴다. */
+[data-theme='dark'] body {
+  background:
+    radial-gradient(900px 640px at 50% 0%, rgba(230, 232, 234, 0.05), transparent 70%),
+    radial-gradient(1200px 800px at 50% 120%, rgba(217, 72, 26, 0.07), transparent 65%),
+    var(--ash-bg);
+  background-attachment: fixed;
+}
+
+[data-theme='dark'] .main-wrapper,
+[data-theme='dark'] .theme-doc-sidebar-container {
+  background: transparent;
+}
+
+/* HUD 라벨 자리: navbar 제목, 사이드바 카테고리, 표 머리, 콜아웃 머리는 모노 대문자 */
+.navbar {
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--ash-hairline);
+  box-shadow: none;
+}
+
+.navbar__title {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+}
+
+.navbar__logo img {
+  filter: drop-shadow(0 0 6px var(--ash-glow));
+}
+
+.theme-doc-sidebar-container {
+  border-right-color: var(--ash-hairline) !important;
+}
+
+.theme-doc-sidebar-menu > .menu__list-item > .menu__list-item-collapsible > .menu__link--sublist {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ash-text-secondary);
+}
+
+.menu__link--active:not(.menu__link--sublist) {
+  box-shadow: inset 2px 0 0 var(--ash-primary);
+}
+
+.markdown h1:first-child {
+  letter-spacing: -0.01em;
+}
+
+[data-theme='dark'] .markdown h1:first-child {
+  color: #f6f7f8;
+  text-shadow: 0 0 18px var(--ash-glow);
+}
+
+.markdown h2 {
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--ash-hairline);
+}
+
+/* accent 는 "지금 여기" 두 곳에만 쓴다: h2 앞 세로 눈금과 현재 목차 항목.
+   기울인 사각형은 글자 기준선과 어긋나 보여 글자 높이에 맞춘 세로 막대로 둔다 */
+.markdown h2::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 0.9em;
+  margin-right: 0.55rem;
+  border-radius: 2px;
+  background: var(--ash-accent);
+  vertical-align: -0.08em;
+}
+
+.table-of-contents__link--active {
+  color: var(--ash-accent);
+}
+
+.markdown th {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ash-text-secondary);
+  background: var(--ash-surface);
+}
+
+/* 표 안의 짧은 식별자(main, scribe)가 글자 단위로 쪼개지지 않게 한다 */
+.markdown td code {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.markdown img {
+  border: 1px solid var(--ash-hairline);
+  border-radius: 6px;
+}
+
+[data-theme='dark'] .markdown img {
+  box-shadow: 0 0 28px rgba(240, 100, 45, 0.1);
+}
+
+pre,
+.theme-code-block {
+  border: 1px solid var(--ash-hairline);
+}
+
+[data-theme='dark'] pre,
+[data-theme='dark'] .theme-code-block {
+  background-color: var(--ash-surface) !important;
+}
+
+/* 콜아웃: danger 는 승인 없이 위험한 동작, warning 은 데이터 손실과 비용, note 는 정본 안내, tip 은 지름길 */
+.theme-admonition {
+  border-radius: 6px;
+  border: 1px solid var(--ash-hairline);
+  border-left-width: 3px;
+  background: var(--ash-surface);
+  color: var(--ash-text);
+  box-shadow: none;
+}
+
+.theme-admonition [class*='admonitionHeading'] {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+}
+
+.theme-admonition-note,
+.theme-admonition-info {
+  border-left-color: var(--ash-primary);
+}
+
+.theme-admonition-tip {
+  border-left-color: var(--ash-agent-team);
+}
+
+.theme-admonition-warning,
+.theme-admonition-caution {
+  border-left-color: var(--ash-warning);
+}
+
+.theme-admonition-danger {
+  border-left-color: var(--ash-danger);
+}
+
+.theme-admonition-note [class*='admonitionHeading'],
+.theme-admonition-info [class*='admonitionHeading'] {
+  color: var(--ash-primary);
+}
+
+.theme-admonition-tip [class*='admonitionHeading'] {
+  color: var(--ash-agent-team);
+}
+
+.theme-admonition-warning [class*='admonitionHeading'],
+.theme-admonition-caution [class*='admonitionHeading'] {
+  color: var(--ash-warning);
+}
+
+.theme-admonition-danger [class*='admonitionHeading'] {
+  color: var(--ash-danger);
+}
+
+.theme-admonition [class*='admonitionIcon'] svg {
+  fill: currentColor;
+}
+
+/* 에이전트 표식. 본문에서 <span className="agent agent--team">SCRIBE</span> 처럼 쓴다 */
+.agent {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.agent::before {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-right: 0.4em;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.agent--main {
+  color: var(--ash-agent-main);
+}
+
+.agent--team {
+  color: var(--ash-agent-team);
+}
+
+.tabs__item--active {
+  border-bottom-color: var(--ash-primary);
+}
+
+/* classic 테마의 footer--dark 는 회색 배경을 박으므로 토큰으로 되돌린다 */
+.footer,
+.footer--dark {
+  --ifm-footer-background-color: var(--ash-surface);
+  --ifm-footer-color: var(--ash-text-secondary);
+  --ifm-footer-link-color: var(--ash-text-secondary);
+  --ifm-footer-link-hover-color: var(--ash-primary);
+  --ifm-footer-title-color: var(--ash-text);
+  border-top: 1px solid var(--ash-hairline);
+}
+
+[data-theme='dark'] .footer {
+  --ifm-footer-background-color: #111316;
+}
+
+.footer__copyright {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+/* mermaid themeVariables 는 라이트에도 같이 들어가 라이트 도표가 깨지므로, 다크 전용 색은 CSS 로 덮는다 */
+[data-theme='dark'] .docusaurus-mermaid-container {
+  --ash-node: #202226;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container :is(.node rect, .node polygon, .node circle, .node path, rect.actor) {
+  fill: var(--ash-node) !important;
+  stroke: var(--ash-primary) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container :is(.flowchart-link, .messageLine0, .messageLine1, line.actor-line) {
+  stroke: var(--ash-primary) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container :is(marker path, #arrowhead path) {
+  fill: var(--ash-primary) !important;
+  stroke: var(--ash-primary) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container :is(.edgeLabel, .edgeLabel rect, .labelBkg) {
+  background-color: var(--ash-bg) !important;
+  fill: var(--ash-bg) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .cluster rect {
+  fill: rgba(240, 100, 45, 0.04) !important;
+  stroke: rgba(240, 100, 45, 0.22) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .cluster-label {
+  color: var(--ash-text-secondary);
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container :is(rect.note, .labelBox) {
+  fill: #202226 !important;
+  stroke: var(--ash-hairline) !important;
+}
+
+/* 라이트 mermaid(neutral)는 회색이라 노드 테두리만 primary 로 맞춘다 */
+[data-theme='light'] .docusaurus-mermaid-container :is(.node rect, .node polygon, .node circle, .node path, rect.actor) {
+  fill: #fbf1ec !important;
+  stroke: var(--ash-primary) !important;
+}
+
+/* 기능 페이지 맨 위의 논문식 그림. SVG 는 `uv run python scripts/docs_figures.py` 로 다시 만들고, MDX 가 인라인으로 넣는다 */
+.paper-fig {
+  --pf-ink: var(--ash-text);
+  --pf-ink-2: var(--ash-text-secondary);
+  --pf-surface: var(--ash-surface);
+  --pf-panel: rgba(194, 65, 12, 0.04);
+  --pf-accent: var(--ash-primary);
+  --pf-accent-fill: rgba(194, 65, 12, 0.08);
+  --pf-deny: var(--ash-danger);
+  --pf-deny-fill: rgba(180, 35, 24, 0.06);
+  --pf-muted: #8b8f95;
+  --pf-panel-solid: #f8f6f5;
+  margin: 0 0 2rem;
+  padding: 0.75rem 0.6rem 0.75rem;
+  border: 1px solid var(--ash-hairline);
+  border-radius: 10px;
+  background: var(--ash-surface);
+}
+
+/* 목차가 보이는 넓은 화면에서는 본문 칸 양옆의 여백(왼쪽 사이드바 쪽 17px, 목차 쪽 34px)까지 그림을 넓힌다.
+   그 여백 안에서만 넓히므로 가로 스크롤이 생기지 않는다 */
+@media (min-width: 997px) {
+  .paper-fig {
+    margin-left: -12px;
+    margin-right: -26px;
+  }
+}
+
+@media (max-width: 600px) {
+  .paper-fig {
+    padding: 0.5rem 0.35rem 0.6rem;
+  }
+}
+
+[data-theme='dark'] .paper-fig {
+  --pf-panel: rgba(240, 100, 45, 0.04);
+  --pf-accent-fill: rgba(240, 100, 45, 0.1);
+  --pf-deny-fill: rgba(240, 95, 95, 0.08);
+  --pf-muted: #6e7278;
+  --pf-panel-solid: #1e1f22;
+}
+
+.paper-fig .pf-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--ifm-font-family-base);
+}
+
+.paper-fig figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: var(--ash-text-secondary);
+}
+
+.paper-fig figcaption b {
+  color: var(--ash-text);
+}
+
+.pf-panel { fill: var(--pf-panel); }
+.pf-plabel { fill: var(--pf-ink-2); font-size: 13.5px; font-weight: 700; }
+.pf-box { fill: var(--pf-surface); stroke: var(--pf-ink-2); stroke-width: 1; }
+.pf-box--io { stroke: var(--pf-ink); stroke-width: 1.3; }
+.pf-box--accent { fill: var(--pf-accent-fill); stroke: var(--pf-accent); stroke-width: 1.8; }
+.pf-box--deny { fill: var(--pf-deny-fill); stroke: var(--pf-deny); }
+.pf-box--muted { stroke: var(--pf-muted); stroke-dasharray: 3 3; }
+.pf-gate { fill: var(--pf-surface); stroke: var(--pf-accent); stroke-width: 1.3; }
+.pf-store { fill: var(--pf-surface); stroke: var(--pf-ink-2); stroke-width: 1; }
+.pf-t { fill: var(--pf-ink); font-size: 15px; font-weight: 600; }
+.pf-tcode { font-family: var(--ifm-font-family-monospace); font-size: 13px; }
+.pf-t--deny { fill: var(--pf-deny); }
+.pf-t--accent { fill: var(--pf-accent); }
+.pf-s { fill: var(--pf-ink-2); font-size: 12.5px; }
+.pf-code { fill: var(--pf-ink-2); font-size: 12px; font-family: var(--ifm-font-family-monospace); }
+.pf-note { fill: var(--pf-ink-2); font-size: 12.5px; font-style: italic; }
+.pf-legend { fill: var(--pf-ink-2); font-size: 12.5px; }
+.pf-edge { fill: none; stroke: var(--pf-ink-2); stroke-width: 1.2; }
+.pf-edge--accent { stroke: var(--pf-accent); stroke-width: 2; }
+.pf-edge--deny { stroke: var(--pf-deny); stroke-width: 1.3; stroke-dasharray: 5 3; }
+.pf-edge--muted { stroke: var(--pf-muted); stroke-width: 1.3; stroke-dasharray: 5 3; }
+.pf-head { fill: var(--pf-ink-2); }
+.pf-head--accent { fill: var(--pf-accent); }
+.pf-head--deny { fill: var(--pf-deny); }
+.pf-head--muted { fill: var(--pf-muted); }
+.pf-elabel { fill: var(--pf-ink-2); font-size: 12.5px; paint-order: stroke; stroke: var(--pf-panel-solid); stroke-width: 4px; stroke-linejoin: round; }
+.pf-elabel--deny { fill: var(--pf-deny); }
+.pf-elabel--accent { fill: var(--pf-accent); }
+.pf-badge { fill: var(--pf-accent); }
+.pf-badge-t { fill: var(--pf-surface); font-size: 12px; font-weight: 700; }
+.pf-box--main { fill: color-mix(in srgb, var(--ash-agent-main) 10%, var(--pf-surface)); stroke: var(--ash-agent-main); stroke-width: 1.4; }
+.pf-box--team { fill: color-mix(in srgb, var(--ash-agent-team) 12%, var(--pf-surface)); stroke: var(--ash-agent-team); stroke-width: 1.4; }
+.pf-chip { fill: var(--pf-ink); font-size: 12.5px; font-weight: 700; font-family: var(--ifm-font-family-monospace); }
+.pf-bar { fill: var(--pf-surface); stroke: var(--pf-ink-2); stroke-width: 1; }
+.pf-bar--accent { fill: var(--pf-accent-fill); stroke: var(--pf-accent); }
+.pf-bar-t { fill: var(--pf-ink); font-size: 12.5px; }
+.pf-bar-t--accent { fill: var(--pf-accent); font-weight: 600; }
+/* 실험 그래프. 세 모델을 늘 같은 색으로 구분한다(로컬 e2b, 로컬 e4b, gpt-4o-mini) */
+:root { --pf-s1: #8fd0df; --pf-s2: #0e7490; --pf-s3: #d08a3e; --pf-grid: rgba(27, 28, 30, 0.12); }
+[data-theme='dark'] { --pf-s1: #2c7486; --pf-s2: #5fc8e2; --pf-s3: #f0b35f; --pf-grid: rgba(230, 232, 234, 0.12); }
+.pf-s1 { fill: var(--pf-s1); }
+.pf-s2 { fill: var(--pf-s2); }
+.pf-s3 { fill: var(--pf-s3); }
+.pf-grid { stroke: var(--pf-grid); stroke-width: 1; }
+.pf-ref { stroke: var(--pf-deny); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.pf-ref-t { fill: var(--pf-deny); font-size: 13px; }
+.pf-val { fill: var(--pf-ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.pf-axis { fill: var(--pf-ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pf-axis-title { fill: var(--pf-ink-2); font-size: 13px; font-weight: 600; }
+.pf-lab { fill: var(--pf-ink-2); font-size: 13.5px; }
+.pf-dot-same { fill: var(--pf-s2); }
+.pf-dot-diff { fill: var(--pf-s3); }
+/* 스코어카드 레이더의 꼭짓점 점. 다크 모드에서도 보이게 글자 색을 따른다 */
+.pf-sc-vertex { fill: var(--pf-ink); }
+.pf-sc-bench { fill: var(--pf-ink-2); font-size: 11.5px; }
+/* 준수표: 전부 지킴, 일부, 하나도 못 지킴. 모델 색과 겹치지 않게 따로 둔다 */
+.pf-ok { fill: var(--pf-ink); }
+.pf-part { fill: var(--pf-surface); stroke: var(--pf-ink); stroke-width: 1.4; }
+.pf-zero { fill: var(--pf-surface); stroke: var(--pf-deny); stroke-width: 1.4; }
+/* 전후 비교: 이전 코드(주황, 점선, 빈 점)와 지금(청록, 실선, 찬 점). 색 없이도 선 모양과 점으로 구분된다.
+   두 모드 모두 dataviz validate_palette 통과(명도 대역, 채도, 색각 이상 ΔE, 대비) */
+:root { --pf-before: #c47a2c; --pf-after: #00789c; }
+[data-theme='dark'] { --pf-before: #bf7d2c; --pf-after: #3aa3c2; }
+.pf-line--before { fill: none; stroke: var(--pf-before); stroke-width: 2; stroke-dasharray: 5 4; stroke-linecap: round; }
+.pf-line--after { fill: none; stroke: var(--pf-after); stroke-width: 2; stroke-linejoin: round; }
+.pf-dot--before { fill: var(--pf-panel-solid); stroke: var(--pf-before); stroke-width: 2; }
+.pf-dot--after { fill: var(--pf-after); stroke: var(--pf-panel-solid); stroke-width: 2; }
+.pf-link { stroke: var(--pf-muted); stroke-width: 2; stroke-linecap: round; }
+.pf-hit { fill: transparent; }
+.pf-hero { fill: var(--pf-ink); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pf-mark { stroke: var(--pf-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.pf-mark-t { fill: var(--pf-ink-2); font-size: 13px; }
+
+/* 기능 페이지 맨 위의 인포그래픽(특징 트리와 처리 흐름). SVG 는 `uv run python -m scripts.docs_infographics` 로 만든다.
+   카드 머리와 아이콘 원은 흰 글자가 4.5:1 을 넘는 진한 색만 쓴다 */
+:root {
+  --if-blue: #1d4ed8;
+  --if-teal: #0f766e;
+  --if-green: #15803d;
+  --if-orange: #c2410c;
+  --if-red: #b91c1c;
+  --if-purple: #6d28d9;
+  --if-pink: #be185d;
+  --if-slate: #475569;
+  --if-tint: 0.09;
+  --if-bar: #1f2a30;
+  --if-line: #64748b;
+}
+
+[data-theme='dark'] {
+  --if-blue: #2563eb;
+  --if-teal: #0d9488;
+  --if-green: #16a34a;
+  --if-orange: #c2410c;
+  --if-red: #dc2626;
+  --if-purple: #7c3aed;
+  --if-pink: #db2777;
+  --if-slate: #64748b;
+  --if-tint: 0.2;
+  --if-bar: #12303b;
+  --if-line: #8aa4ad;
+}
+
+.info-fig {
+  margin: 0 0 2rem;
+  padding: 0.75rem 0.5rem 0.5rem;
+  border-radius: 14px;
+  background: var(--ash-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+[data-theme='dark'] .info-fig {
+  border: 1px solid var(--ash-hairline);
+  box-shadow: none;
+}
+
+/* 인포그래픽은 예전 크기(본문 폭보다 38px 넓게)의 75% 로 가운데에 둔다. 휴대폰 폭에서는 글자가 너무 작아져 본문 폭을 다 쓴다 */
+@media (min-width: 768px) {
+  .info-fig {
+    width: calc((100% + 38px) * 0.75);
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+.info-fig .if-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--ifm-font-family-base);
+}
+
+.if-title { fill: var(--ash-primary); }
+.if-title-t { fill: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+[data-theme='dark'] .if-title-t { fill: #14161a; }
+.if-tagline { fill: var(--ash-text-secondary); font-size: 14px; }
+.if-edge { fill: none; stroke: var(--if-line); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.if-head, .if-dot { fill: var(--if-line); }
+.if-ring { fill: var(--ash-surface); stroke: var(--ash-hairline); stroke-width: 1; }
+.if-icon { fill: none; stroke: #ffffff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.if-feature { fill: var(--ash-text); font-size: 14.5px; font-weight: 700; }
+.if-feature-sub { fill: var(--ash-text-secondary); font-size: 12.5px; }
+.if-bar { fill: var(--if-bar); }
+.if-bar-t { fill: #ffffff; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
+.if-card-t { fill: #ffffff; font-size: 13.5px; font-weight: 700; }
+.if-card-b { fill: var(--ash-text); font-size: 12.5px; }
+.if-decision { fill: var(--ash-surface); stroke-width: 2; }
+.if-decision-t { fill: var(--ash-text); font-size: 13.5px; font-weight: 700; }
+.if-end { stroke-width: 2.4; }
+.if-chip { stroke-dasharray: 4 3; }
+.if-chip-t { fill: var(--ash-text); font-size: 12.5px; }
+.if-yes { fill: var(--if-green); font-size: 12px; font-weight: 700; text-anchor: middle; }
+.if-no { fill: var(--if-red); font-size: 12px; font-weight: 700; }
+.if-c-blue { fill: var(--if-blue); } .if-s-blue { stroke: var(--if-blue); } .if-t-blue { fill: color-mix(in srgb, var(--if-blue) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-teal { fill: var(--if-teal); } .if-s-teal { stroke: var(--if-teal); } .if-t-teal { fill: color-mix(in srgb, var(--if-teal) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-green { fill: var(--if-green); } .if-s-green { stroke: var(--if-green); } .if-t-green { fill: color-mix(in srgb, var(--if-green) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-orange { fill: var(--if-orange); } .if-s-orange { stroke: var(--if-orange); } .if-t-orange { fill: color-mix(in srgb, var(--if-orange) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-red { fill: var(--if-red); } .if-s-red { stroke: var(--if-red); } .if-t-red { fill: color-mix(in srgb, var(--if-red) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-purple { fill: var(--if-purple); } .if-s-purple { stroke: var(--if-purple); } .if-t-purple { fill: color-mix(in srgb, var(--if-purple) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-pink { fill: var(--if-pink); } .if-s-pink { stroke: var(--if-pink); } .if-t-pink { fill: color-mix(in srgb, var(--if-pink) calc(var(--if-tint) * 100%), var(--ash-surface)); }
+.if-c-slate { fill: var(--if-slate); } .if-s-slate { stroke: var(--if-slate); } .if-t-slate { fill: color-mix(in srgb, var(--if-slate) calc(var(--if-tint) * 100%), var(--ash-surface)); }

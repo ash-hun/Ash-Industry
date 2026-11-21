@@ -1,0 +1,55 @@
+{
+  "name": "ash-industry-desktop",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Ash Industry Web HUD 를 띄우는 Electron 셸. 백엔드는 docker compose 의 ash-backend 이고 앱은 띄우지 않는다.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --mac --arm64 --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "^26.18.1"
+  },
+  "build": {
+    "appId": "com.ashhun.ashindustry",
+    "productName": "Ash Industry",
+    "artifactName": "AshIndustry-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "backend_probe.js",
+      "boot_sequence.js",
+      "desktop_settings.js",
+      "userdata_migration.js",
+      "window_hide.js",
+      "loading.html",
+      "icons/icon.png",
+      "icons/trayTemplate.png",
+      "icons/trayTemplate@2x.png",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "icons/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Ash Industry 에이전트가 음성 명령을 들으려면 마이크가 필요합니다."
+      }
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "npmRebuild": false
+  }
+}

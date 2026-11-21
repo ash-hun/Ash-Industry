@@ -1,0 +1,14 @@
+# 성찰 루프가 주기적으로 훑는 외부 소스. server 는 ASH_MCP_SERVERS 의 name, tool 은 그 서버의 도구 이름이다.
+# 새로 본 결과만 inbox 에 올라 🔔 로 먼저 알린다(이미 본 것은 ~/.ash/external_seen.jsonl 로 거른다).
+# 이 파일은 예시다. 같은 폴더에 google.yaml 로 복사해 라벨, 계정 등 개인 값을 적는다(*.yaml 은 git 에 올라가지 않는다).
+- name: gmail-unread
+  server: google
+  tool: search_gmail_messages
+  args: { query: "is:unread newer_than:1d", page_size: 10 }
+  interval_sec: 300
+# 특정 라벨의 새 메일만 보려면 query 에 라벨을 넣는다. 예: "label:중요 is:unread newer_than:1d"
+- name: calendar-upcoming
+  server: google
+  tool: get_events
+  args: { max_results: 10 }
+  interval_sec: 600

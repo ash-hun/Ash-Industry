@@ -1,0 +1,71 @@
+"""web_hud 로그의 공통 로거: 플랫폼 루트에 핸들러 하나, 기록 순간의 stdout, json 형식, 비밀값 마스킹을 검증한다."""
+
+import io
+import sys
+import json
+import pytest
+import logging
+
+from ash_industry.common.logger import LOG_FORMAT_ENV, LOG_LEVEL_ENV, ROOT_NAME, _StdoutHandler, get_logger
+from ash_industry.common import logger as logger_module
+
+
+@pytest.fixture(autouse=True)
+def fresh_console_logging(monkeypatch):
+    """앞선 테스트가 남긴 설정에 기대지 않는다. 실험 스크립트는 import 때 ASH_LOG_LEVEL=WARNING 을 두는데,
+    전체 실행에서 integ 가 먼저 돌면 그 레벨로 설정돼 info 줄이 사라졌다(실측)."""
+    previous_level = logging.getLogger(ROOT_NAME).level
+    monkeypatch.delenv(LOG_LEVEL_ENV, raising=False)
+    monkeypatch.delenv(LOG_FORMAT_ENV, raising=False)
+    monkeypatch.setattr(logger_module, "_configured", False)
+    logger_module.configure_logging()
+    yield
+    logger_module._configured = False
+    logger_module.configure_logging()
+    logging.getLogger(ROOT_NAME).setLevel(previous_level)
+
+
+@pytest.fixture
+def json_format(monkeypatch):
+    monkeypatch.setattr(logger_module, "_configured", False)
+    logger_module.configure_logging(fmt="json")
+
+
+def test_handler_is_added_once_across_calls():
+    get_logger("ash_industry.a")
+    get_logger("ash_industry.b")
+    get_logger("ash_industry.a")
+    logger_module.configure_logging()
+
+    stdout_handlers = [h for h in logging.getLogger(ROOT_NAME).handlers if isinstance(h, _StdoutHandler)]
+    assert len(stdout_handlers) == 1
+    assert logging.getLogger(ROOT_NAME).propagate is False
+
+
+def test_writes_to_current_stdout(monkeypatch):
+    logger = get_logger("ash_industry.test_logger")
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    logger.info("[Test] hello")
+    assert "[Test] hello" in buf.getvalue()
+
+
+def test_follows_stdout_swapped_after_first_call(capsys):
+    logger = get_logger("ash_industry.test_logger2")
+    logger.info("first")
+    assert "first" in capsys.readouterr().out
+    logger.info("second")
+    out = capsys.readouterr().out
+    assert "second" in out and "first" not in out
+
+
+def test_non_platform_names_do_not_get_the_handler(capsys):
+    get_logger("other.module").info("x")
+    assert capsys.readouterr().out == ""
+
+
+def test_json_format_emits_one_object_per_line_and_masks_secrets(json_format, capsys):
+    get_logger("ash_industry.test_json").info("login", api_key="sk-live", user="ash")
+    record = json.loads(capsys.readouterr().out.strip())
+    assert record["event"] == "login" and record["level"] == "info" and record["logger"] == "ash_industry.test_json"
+    assert record["api_key"] == "***" and record["user"] == "ash"

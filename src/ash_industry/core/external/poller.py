@@ -1,0 +1,141 @@
+"""[core] 소스별 주기로 외부 세계를 훑어 dedup 하고 inbox 에 적재한 뒤 성찰 트리거를 깨운다."""
+
+import time
+import asyncio
+import contextlib
+from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+
+from ash_industry.core.external.external_protocol import ExternalSource
+from ash_industry.core.external.external_types import ExternalEvent
+from ash_industry.core.proactive.triggers import ExternalTrigger
+from ash_industry.core.external.inbox import ExternalEventInbox
+from ash_industry.core.external.dedup import SeenStore
+from ash_industry.common.logger import get_logger
+
+if TYPE_CHECKING:
+    from ash_industry.core.workflow.job_board import JobBoard
+
+Sleeper = Callable[[float], Awaitable[None]]
+Clock = Callable[[], float]
+
+logger = get_logger(__name__)
+
+
+class ExternalEventPoller:
+    """소스별 주기로 외부 세계를 훑어 dedup → inbox 적재 → 트리거 발화.
+
+    SchedulerService·ProactivityDaemon의 형제. 순수하게 주기·생명주기만 맡고,
+    "무엇을 감지할지"는 주입된 소스가, "말할지"는 기존 proactive policy가 정한다.
+    sleep/clock을 주입할 수 있어 실시간 대기 없이 루프를 검증한다.
+    """
+
+    def __init__(
+        self,
+        sources: list[ExternalSource],
+        inbox: ExternalEventInbox,
+        seen: SeenStore,
+        *,
+        trigger: ExternalTrigger | None = None,
+        max_events_per_tick: int = 20,
+        sleep: Sleeper = asyncio.sleep,
+        clock: Clock = time.monotonic,
+    ) -> None:
+        self._sources = sources
+        self._inbox = inbox
+        self._seen = seen
+        self._trigger = trigger
+        self._max_events = max_events_per_tick
+        self._sleep = sleep
+        self._clock = clock
+        # 최초 틱에서 전 소스를 즉시 1회 폴링한다(기동 직후 현재 상태 파악).
+        self._next_due: dict[str, float] = {s.name: 0.0 for s in sources}
+        self._running = False
+        self._task: asyncio.Task[None] | None = None
+        self._jobs: JobBoard | None = None
+
+    def set_job_board(self, board: "JobBoard | None") -> None:
+        """틱마다 시작과 끝을 적을 곳. Web 이 Workflow 화면을 위해 단다."""
+        self._jobs = board
+
+    async def start(self) -> None:
+        if self._running or not self._sources:
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        self._running = False
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+
+    async def tick(self) -> int:
+        """주기가 도래한 소스를 1회씩 폴링하고 새 이벤트 건수를 반환."""
+        now = self._clock()
+        due = [s for s in self._sources if self._next_due.get(s.name, 0.0) <= now]
+        if not due:
+            return 0
+        # 루프는 1초마다 깨어난다. 실제로 조회할 소스가 있을 때만 작업 실행으로 적는다
+        if self._jobs is None:
+            return await self._poll(due, now)
+        async with self._jobs.track("external:poll", "external", ", ".join(s.name for s in due)):
+            return await self._poll(due, now)
+
+    async def _poll(self, due: list[ExternalSource], now: float) -> int:
+        collected: list[ExternalEvent] = []
+        for source in due:
+            self._next_due[source.name] = now + source.interval_sec
+            # 소스별 예외 격리 — 한 소스의 실패가 루프를 죽이지 않는다.
+            try:
+                collected.extend(await source.poll())
+            except Exception as exc:
+                logger.info(f"[ExternalEventPoller] '{source.name}' poll failed: {exc}")
+
+        if not collected:
+            return 0
+
+        try:
+            # 상한 안의 것만 본 것으로 적는다. 다 적고 자르면 잘린 이벤트가 본 것으로 남아 다시 오지 않는다
+            fresh = await self._seen.filter_new(collected, limit=self._max_events)
+        except Exception as exc:
+            logger.info(f"[ExternalEventPoller] dedup failed: {exc}")
+            return 0
+
+        if not fresh:
+            return 0
+
+        if len(fresh) == self._max_events:
+            logger.info(
+                f"[ExternalEventPoller] 상한 {self._max_events}건까지 전달. "
+                f"나머지는 본 것으로 적지 않아 다음 조회 때 다시 온다"
+            )
+
+        self._inbox.put(fresh)
+        if self._trigger is not None:
+            self._trigger.fire()
+        return len(fresh)
+
+    def _sleep_seconds(self) -> float:
+        """다음 도래 시각까지의 대기 시간(최소 1초)."""
+        if not self._sources:
+            return 1.0
+        now = self._clock()
+        remaining = [max(0.0, self._next_due.get(s.name, 0.0) - now) for s in self._sources]
+        return max(1.0, min(remaining))
+
+    async def _loop(self) -> None:
+        while self._running:
+            try:
+                await self.tick()
+            except Exception as exc:
+                logger.info(f"[ExternalEventPoller] tick failed: {exc}")
+            if not self._running:
+                break
+            await self._sleep(self._sleep_seconds())
+
+    @property
+    def is_running(self) -> bool:
+        return self._running

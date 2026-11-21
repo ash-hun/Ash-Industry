@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>HUD</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#14161a">
+  <meta name="description" content="개인 비서 에이전트 HUD">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="A.S.H.">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500&family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- 에이전트 브랜드(이름·명언·색). 동기 로드 — 첫 페인트 전에 CSS 변수를 채운다. -->
+  <script src="brand.js"></script>
+</head>
+<body data-view="hud">
+
+<canvas class="starfield" id="starfield" aria-hidden="true"></canvas>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="left">
+    <button class="drawer-btn" id="drawer-btn" type="button" aria-label="패널 열기" aria-expanded="false">
+      <span class="bars"></span>
+    </button>
+  </div>
+  <!-- 가운데 묶음은 리액터 구체의 가로 중심에 맞춘다(app/header.js). 점은 백엔드 연결 상태 -->
+  <div class="center" id="header-center">
+    <div class="brand-line">
+      <span class="link-tick" id="link-tick" role="status" aria-label="연결 끊김" title="연결 끊김"></span>
+      <span class="agent-name" data-brand="name">A.S.H.</span>
+    </div>
+    <time class="clock" id="clock"></time>
+  </div>
+  <div class="right">
+    <div class="view-tabs" id="view-seg" role="radiogroup" aria-label="화면">
+      <button type="button" role="radio" data-view="hud" aria-checked="true" title="대화와 상태 카드">HUD</button>
+      <button type="button" role="radio" data-view="workflow" aria-checked="false" title="에이전트 관계 그래프와 백그라운드 작업">FLOW</button>
+      <button type="button" role="radio" data-view="settings" aria-checked="false" title="설정 보기와 편집">SET</button>
+    </div>
+  </div>
+</header>
+
+<!-- ION 띠 — 플랫폼 감시(Ion)가 연 사고. /ion/ 은 nginx 가 Ion 컨테이너로 보내 백엔드가 죽어도 산다 -->
+<section class="ion-strip" id="ion-strip" hidden aria-live="polite" aria-label="플랫폼 사고">
+  <span class="ion-mark">ION</span>
+  <ul class="ion-list" id="ion-list"></ul>
+</section>
+
+<!-- MAIN STAGE — 가운데 리액터, 좌우 HUD 카드 -->
+<main class="stage">
+
+  <!-- REACTOR -->
+  <section class="reactor">
+    <!-- 뒤에서 도는 작업마다 반짝이는 별(app/task-stars.js). 구체 바깥, 가운데 열 안쪽 -->
+    <div class="task-stars" id="task-stars"></div>
+    <div class="sphere-wrap">
+      <!-- 레이어(아래→위): 입자 구(WebGL) → 링·어둡게 처리(2D) → 워드마크 -->
+      <canvas id="sphere-gl" class="sphere-gl" aria-hidden="true"></canvas>
+      <canvas id="hud-canvas" class="sphere-canvas"></canvas>
+      <div class="reactor-wordmark" data-brand="name">A.S.H.</div>
+      <div class="sphere-hit" id="sphere-hit" title="voice mode 토글"></div>
+      <!-- 에이전트 전환. 에이전트가 둘 이상일 때만 보인다. 구체를 좌우로 밀어도 같다(app/agent-nav.js) -->
+      <button class="agent-nav prev" id="agent-prev" type="button" hidden><span class="chevron" aria-hidden="true"></span></button>
+      <button class="agent-nav next" id="agent-next" type="button" hidden><span class="chevron" aria-hidden="true"></span></button>
+      <!-- Focus 때 구체 둘레를 따라 그려지는 호. 구체와 같이 줄어든다 -->
+      <svg class="focus-arcs" viewBox="-8 -8 116 116" aria-hidden="true">
+        <path d="M 2.67 37.32 A 49 49 0 0 1 37.32 2.67 M 15.35 15.35 L 10.40 10.40" />
+        <path d="M 62.68 2.67 A 49 49 0 0 1 97.33 37.32 M 84.65 15.35 L 89.60 10.40" />
+        <path d="M 37.32 97.33 A 49 49 0 0 1 2.67 62.68 M 15.35 84.65 L 10.40 89.60" />
+        <path d="M 97.33 62.68 A 49 49 0 0 1 62.68 97.33 M 84.65 84.65 L 89.60 89.60" />
+      </svg>
+    </div>
+    <div class="reactor-status" id="reactor-status" data-state="idle">ACTIVE</div>
+    <p class="reactor-caption quote" id="reactor-caption" aria-live="polite"></p>
+
+    <!-- FOCUS — /focus 동안 구체 둘레에 네 영역. body[data-focus="on"] 일 때만 보인다 -->
+    <div class="focus-ring" id="focus-ring" aria-hidden="true">
+      <section class="hud-card focus-panel" data-area="reference" style="--i:0">
+        <div class="panel-head"><span>Reference</span><span class="count">조사 및 종합</span></div>
+        <div class="focus-body" data-empty="조사 중인 레퍼런스가 없습니다"></div>
+      </section>
+      <section class="hud-card focus-panel" data-area="analysis" style="--i:1">
+        <div class="panel-head"><span>Analysis</span><span class="count">목적, 필요, 다음 지시</span></div>
+        <div class="focus-body" data-empty="지시를 분석하는 중입니다"></div>
+      </section>
+      <section class="hud-card focus-panel" data-area="log" style="--i:2">
+        <div class="panel-head"><span>Log</span><span class="count">작업 기록</span></div>
+        <div class="focus-body" data-empty="아직 기록이 없습니다"></div>
+        <div class="focus-foot" id="focus-log-foot"></div>
+      </section>
+      <section class="hud-card focus-panel" data-area="progress" style="--i:3">
+        <div class="panel-head"><span>Progress</span><span class="count" id="focus-elapsed">00:00</span></div>
+        <div class="focus-progress">
+          <p class="focus-task" id="focus-task"></p>
+          <div class="focus-meter">
+            <span class="focus-percent" id="focus-percent">0%</span>
+            <span class="focus-eta" id="focus-eta">예상 시간 계산 중</span>
+          </div>
+          <div class="focus-bar"><span id="focus-bar-fill"></span></div>
+          <ol class="focus-steps" id="focus-steps"></ol>
+        </div>
+        <div class="focus-foot" id="focus-progress-foot"></div>
+      </section>
+    </div>
+  </section>
+
+
+  <!-- 왼쪽 열 — Agenda · Activity · System. 좁은 화면에선 드로어 -->
+  <div class="hud-col hud-side" id="hud-side">
+
+    <section class="hud-card agenda-card">
+      <div class="panel-head"><span>Agenda</span><span class="count" id="agenda-count">0</span></div>
+      <div class="agenda-body">
+        <div class="agenda-sub">Upcoming</div>
+        <ul class="agenda-list" id="schedule-list" data-empty="예정된 작업 없음"></ul>
+        <div class="agenda-sub">Open loops</div>
+        <ul class="agenda-list" id="openloop-list" data-empty="남은 할 일 없음"></ul>
+        <!-- 최근 닫힌 약속. 잘못 닫힌 것을 ↺ 로 되살린다. 평소엔 접어 둔다 -->
+        <details class="agenda-closed" id="closedloop-box" hidden>
+          <summary class="agenda-sub">Closed <span id="closedloop-count"></span></summary>
+          <ul class="agenda-list" id="closedloop-list"></ul>
+        </details>
+      </div>
+    </section>
+
+    <section class="hud-card log-card">
+      <div class="panel-head"><span>Activity</span><span class="count">LOG</span></div>
+      <ol class="activity-log" id="activity-log"></ol>
+    </section>
+
+  </div>
+
+  <!-- 오른쪽 열 — Sessions · Conversation. 카드를 접으면 아래 카드가 자리를 채운다 -->
+  <div class="hud-col chat-col">
+    <section class="hud-card sessions-card">
+      <div class="panel-head" id="sessions-toggle" title="클릭해서 접기/펼치기">
+        <span class="chev">▾</span>
+        <span>Sessions</span>
+        <span class="count" id="session-count">01</span>
+        <button class="icon-btn" id="new-session-btn" type="button" title="새 세션">+</button>
+      </div>
+      <div class="session-list" id="session-list"></div>
+    </section>
+
+    <section class="hud-card chat-card">
+      <div class="panel-head" id="chat-toggle" title="클릭해서 접기/펼치기">
+        <span class="chev">▾</span>
+        <span>Conversation</span>
+        <span class="count"><span id="msg-count">0</span> MSG</span>
+      </div>
+      <div class="messages" id="messages"></div>
+      <!-- 일하는 동안 보낸 말(app/queue.js). 도구 결과 뒤나 턴이 끝난 뒤 대화로 옮겨 간다 -->
+      <div class="queue-list" id="queue-list" hidden>
+        <ul id="queue-items"></ul>
+        <div class="queue-hint">대기 · Ctrl+Enter 지금 보내기 · ↑ 되가져오기 · Esc 멈추기</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- WORKFLOW VIEW — 에이전트 관계 그래프, 최근 위임, 백그라운드 작업 -->
+<section class="view-panel" id="view-workflow" data-view-panel="workflow" aria-label="Workflow" hidden>
+  <section class="hud-card wf-graph-card">
+    <div class="panel-head">
+      <span>Agent knowledge graph</span><span class="count" id="wf-summary">—</span>
+      <span class="wf-actions">
+        <button type="button" class="wf-btn" id="wf-zoom-out" title="축소(휠 아래)" aria-label="축소">−</button>
+        <button type="button" class="wf-btn" id="wf-zoom-in" title="확대(휠 위)" aria-label="확대">+</button>
+        <button type="button" class="wf-btn" id="wf-zoom-fit" title="전체가 보이게 맞춘다">맞춤</button>
+        <button type="button" class="wf-btn" id="wf-tidy" title="겹치는 노드를 밀어내 다시 놓는다">정렬 최적화</button>
+        <button type="button" class="wf-btn" id="wf-reset" title="옮긴 자리를 모두 지우고 기본 배치로">원래대로</button>
+      </span>
+    </div>
+    <svg class="wf-graph" id="wf-graph" viewBox="0 0 960 540" role="img" aria-label="에이전트와 능력 지식 그래프"></svg>
+    <div class="wf-tip" id="wf-tip" role="tooltip" hidden><b></b><span></span></div>
+    <ul class="wf-legend" aria-hidden="true">
+      <li><i class="dot"></i>그 에이전트만 가진 능력</li>
+      <li><i class="dot dot-shared"></i>함께 쓰는 능력</li>
+      <li><i class="dot dot-approval"></i>승인 필요</li>
+      <li><i class="lg lg-sub"></i>sub-agent, focus, orchestrate</li>
+      <li><i class="lg lg-live"></i>진행 중 위임</li>
+      <li><i class="lg lg-err"></i>마지막 위임 실패</li>
+    </ul>
+  </section>
+  <section class="hud-card wf-map-card">
+    <div class="panel-head"><span>Agent map</span><span class="count" id="wf-map-count">—</span></div>
+    <div class="wf-map" id="wf-map">
+      <svg class="wf-map-links" id="wf-map-links" aria-hidden="true"></svg>
+      <div class="wf-map-cols" id="wf-map-cols" data-empty="이 세션에서 나간 위임이 아직 없습니다"></div>
+    </div>
+  </section>
+  <section class="hud-card wf-jobs-card">
+    <div class="panel-head">
+      <button type="button" class="wf-fold" id="wf-jobs-toggle" aria-expanded="false" aria-controls="wf-jobs-body" title="백그라운드 작업 표를 펼치거나 접는다">Background jobs</button>
+      <span class="count" id="wf-jobs-brief">—</span>
+      <span class="count wf-daemon" id="wf-daemon">—</span>
+    </div>
+    <div class="wf-jobs-wrap" id="wf-jobs-body" hidden>
+      <table class="wf-jobs">
+        <thead><tr><th>작업</th><th>상태</th><th>실행</th><th>마지막</th><th>다음</th></tr></thead>
+        <tbody id="wf-jobs"></tbody>
+      </table>
+      <p class="wf-empty" id="wf-jobs-empty" hidden>등록된 백그라운드 작업이 없습니다</p>
+    </div>
+  </section>
+</section>
+
+<!-- SETTINGS VIEW — 허용 목록 편집, 데스크톱 설정, 적용값 -->
+<section class="view-panel" id="view-settings" data-view-panel="settings" aria-label="Settings" hidden>
+  <!-- 모델, 세션, 토큰, 비용, 도구 목록. 대화 중에 볼 일이 적어 HUD 에서 옮겼다 -->
+  <section class="hud-card system-card">
+    <div class="panel-head"><span>System</span><span class="count" id="uptime">00:00:00</span></div>
+    <dl class="stat-grid">
+      <dt>Model</dt><dd id="sys-model">—</dd>
+      <dt>Session</dt><dd id="session-id-label">—</dd>
+      <dt>Tokens</dt><dd id="usage-total-tokens">0</dd>
+      <dt>Tools</dt>
+      <dd><button class="tools-toggle" id="tools-toggle" type="button" aria-expanded="false" aria-controls="tools-list">
+        <span id="tools-count">0</span> <span class="chev">▾</span>
+      </button></dd>
+      <dt class="sep">In</dt><dd class="sep" id="u-in">0</dd>
+      <dt>Out</dt><dd id="u-out">0</dd>
+      <dt>Cache↓</dt><dd id="u-cr">0</dd>
+      <dt>Cache↑</dt><dd id="u-cw">0</dd>
+      <dt>Cost</dt><dd class="cost-val" id="u-cost">$0.0000</dd>
+    </dl>
+    <ul class="tools-list" id="tools-list" hidden></ul>
+    <div class="usage-sparkline" id="usage-sparkline"></div>
+  </section>
+  <form class="hud-card settings-card" id="settings-form" novalidate>
+    <div class="panel-head"><span>Settings</span><span class="count" id="settings-path">—</span></div>
+    <div class="settings-fields" id="settings-fields"></div>
+    <div class="settings-actions">
+      <span class="settings-status" id="settings-status" role="status"></span>
+      <button class="art-btn" type="button" id="settings-restart" hidden>RESTART BACKEND</button>
+      <button class="art-btn" type="submit" id="settings-save">SAVE</button>
+    </div>
+  </form>
+  <section class="hud-card settings-card" id="desktop-card" hidden>
+    <div class="panel-head"><span>Desktop</span><span class="count">앱 전용</span></div>
+    <div class="settings-fields" id="desktop-fields"></div>
+    <div class="settings-actions">
+      <span class="settings-status" id="desktop-status" role="status"></span>
+      <button class="art-btn" type="button" id="desktop-save">SAVE</button>
+    </div>
+  </section>
+  <section class="hud-card settings-card mcp-card" id="mcp-card" hidden>
+    <div class="panel-head"><span>MCP</span><span class="count" id="mcp-path">—</span></div>
+    <div class="mcp-defaults" id="mcp-defaults"></div>
+    <div class="mcp-tools" id="mcp-tools"></div>
+    <div class="settings-actions">
+      <span class="settings-status" id="mcp-status" role="status"></span>
+      <button class="art-btn" type="button" id="mcp-save">SAVE</button>
+    </div>
+    <div class="panel-head mcp-audit-head"><span>MCP calls</span><span class="count" id="mcp-audit-count">0</span></div>
+    <ol class="wf-list mcp-audit" id="mcp-audit" data-empty="아직 MCP 호출이 없습니다"></ol>
+  </section>
+  <section class="hud-card settings-card effective-card">
+    <div class="panel-head"><span>Effective config</span><span class="count">비밀값 ***</span></div>
+    <pre class="settings-effective" id="settings-effective"></pre>
+  </section>
+</section>
+
+<!-- COMPOSER DOCK -->
+<form class="composer" id="composer">
+  <label class="field-wrap">
+    <span class="prompt">&gt;_</span>
+    <div class="input-wrapper">
+      <!-- Slash command popup (positioned above input) -->
+      <div class="slash-popup hidden" id="slash-popup" role="listbox" aria-label="slash commands"></div>
+      <!-- Highlight overlay: renders colored /command tokens behind the input -->
+      <div class="input-highlight" id="input-highlight" aria-hidden="true">
+        <span id="input-highlight-inner"></span>
+      </div>
+      <input
+        id="chat-input"
+        type="text"
+        placeholder="리액터를 눌러 voice mode를 켜거나 메시지를 입력하세요."
+        autocomplete="off"
+        spellcheck="false"
+      >
+    </div>
+  </label>
+  <button class="send-btn" id="send-btn" type="submit">SEND ⏎</button>
+</form>
+
+<!-- MOBILE DRAWER SCRIM -->
+<div class="drawer-scrim" id="drawer-scrim" hidden></div>
+
+<!-- ARTIFACT PANEL -->
+<aside class="artifact-panel" id="artifact-panel">
+  <div class="artifact-head">
+    <div class="artifact-title">
+      <span class="artifact-icon">◈</span>
+      <span class="artifact-lang-lbl" id="artifact-lang">—</span>
+    </div>
+    <div class="artifact-acts">
+      <button class="art-btn" id="artifact-copy-btn">COPY</button>
+      <button class="art-btn art-close" id="artifact-close-btn">✕</button>
+    </div>
+  </div>
+  <div class="artifact-body">
+    <pre class="artifact-pre"><code id="artifact-code"></code></pre>
+  </div>
+</aside>
+
+<!-- APPROVAL MODAL -->
+<div class="approval-overlay hidden" id="approval-overlay">
+  <div class="approval-box">
+    <h3>⚡ AUTHORIZATION REQUIRED</h3>
+    <p class="approval-reason" id="approval-reason"></p>
+    <div class="approval-command" id="approval-command"></div>
+    <p class="approval-hint" id="approval-hint">이 명령을 허용하시겠습니까? (120초 후 자동 거부)</p>
+    <div class="approval-btns">
+      <button class="btn-always hidden" id="btn-always">ALWAYS</button>
+      <button class="btn-allow" id="btn-allow">ALLOW</button>
+      <button class="btn-deny" id="btn-deny">DENY</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL: 브라우저 confirm() 대신 쓰는 HUD 확인 창(app/confirm-dialog.js) -->
+<div class="approval-overlay hidden" id="confirm-overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+  <div class="approval-box">
+    <h3 id="confirm-title"></h3>
+    <p class="approval-hint" id="confirm-message"></p>
+    <div class="approval-btns">
+      <button class="btn-deny" id="confirm-ok" type="button"></button>
+      <button class="btn-allow" id="confirm-cancel" type="button"></button>
+    </div>
+  </div>
+</div>
+
+<!-- MEDIA PLAYER MODAL: 도구가 만든 영상, 음악 결과물 -->
+<div class="media-overlay hidden" id="media-overlay" role="dialog" aria-modal="true" aria-labelledby="media-title">
+  <div class="media-box">
+    <div class="media-head">
+      <span class="media-kind" id="media-kind">VIDEO</span>
+      <span class="media-title" id="media-title">—</span>
+      <span class="media-acts">
+        <a class="art-btn" id="media-open" href="#" target="_blank" rel="noopener">새 탭</a>
+        <button class="art-btn art-close" id="media-close" type="button" aria-label="닫기">✕</button>
+      </span>
+    </div>
+    <div class="media-stage" id="media-stage"></div>
+    <p class="media-path" id="media-path"></p>
+  </div>
+</div>
+
+<!-- 다른 세션의 승인 대기(app/approval-wait.js). 누르면 그 세션으로 옮긴다 -->
+<div class="approval-wait" id="approval-wait" hidden></div>
+
+<!-- CONNECTION BANNER -->
+<div class="connection-banner hidden" id="connection-banner">
+  ⚠ <span data-brand="name">A.S.H.</span> 연결 끊김 — 재연결 중...
+</div>
+
+<script type="importmap">
+  { "imports": {
+      "three": "./vendor/three/three.module.min.js"
+  } }
+</script>
+<script src="hud.js"></script>
+<script src="voice.js"></script>
+<!-- 모듈은 defer — hud.js 의 window.HUD, voice.js 의 VoiceManager 가 준비된 뒤 실행된다 -->
+<script type="module" src="app/main.js"></script>
+<script type="module" src="sphere.js"></script>
+
+<!-- PWA: service worker 등록 (http/https에서만, 실패해도 앱 동작엔 영향 없음) -->
+<script>
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((err) => {
+        console.warn('[PWA] service worker 등록 실패:', err);
+      });
+    });
+  }
+</script>
+</body>
+</html>

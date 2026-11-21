@@ -1,0 +1,216 @@
+services:
+  # ── 테스트 실행 (실 API 없이) ────────────────────────────────────────────────
+  test:
+    build:
+      context: .
+      target: test
+    environment:
+      ASH_DEBUG: "true"
+      ASH_LLM__PROVIDER: "faux"
+      ASH_LLM__MODEL: "faux-model"
+      ASH_MEMORY__BACKEND: "in_memory"
+      ASH_SESSION__SESSIONS_DIR: "/tmp/ash/sessions"
+      ASH_MEMORY__SQLITE_PATH: "/tmp/ash/memory.db"
+      ASH_SECURITY__REQUIRE_AUTH: "false"
+    volumes:
+      - ./tests:/app/tests
+      - ./src:/app/src
+    # 프로필 없이 `up` 할 때 끼어들지 않도록 분리 — `docker compose run --rm test` 로 실행
+    profiles: ["test"]
+    command: ["uv", "run", "pytest", "-v", "--no-header", "--tb=short"]
+
+  # ── 특정 테스트만 실행: docker compose run --rm test-single ──────────────────
+  test-single:
+    build:
+      context: .
+      target: test
+    environment:
+      ASH_DEBUG: "true"
+      ASH_LLM__PROVIDER: "faux"
+      ASH_SECURITY__REQUIRE_AUTH: "false"
+    volumes:
+      - ./tests:/app/tests
+      - ./src:/app/src
+    profiles: ["manual"]
+    command: ["uv", "run", "pytest", "-v", "--no-header", "--tb=long", "-s"]
+
+  # ── PostgreSQL (세션 영속성) ──────────────────────────────────────────────────
+  # web 프로파일에서 자동 기동. 외부 DB를 쓸 때는 ASH_SESSION__POSTGRES_DSN을
+  # .env에 설정하면 해당 DSN이 우선 적용된다.
+  postgres:
+    image: pgvector/pgvector:pg16  # postgres 16 + pgvector. 메모리 의미 검색용
+    environment:
+      POSTGRES_USER: ash
+      POSTGRES_PASSWORD: ash
+      POSTGRES_DB: ash
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ash -d ash"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    profiles: ["web"]
+
+  # ── Web HUD 백엔드 (FastAPI + WebSocket + Agent) ───────────────────────────
+  ash-backend:
+    build:
+      context: .
+      target: runtime-web
+    env_file:
+      - .env
+    environment:
+      # 스케줄(cron)과 /schedule 마감 시각은 컨테이너 로컬 시간으로 해석된다.
+      # 기본 UTC 이면 "오전 9시"가 한국 시간 18시에 돈다 — .env 의 TZ 로 바꿀 수 있다.
+      TZ: ${TZ:-Asia/Seoul}
+      # 컨테이너 stdout 은 TTY 가 아니라 print 가 블록 버퍼링된다. 이게 없으면 docker logs 에 아무것도 안 보인다
+      PYTHONUNBUFFERED: "1"
+      ASH_LLM__PROVIDER: ${ASH_LLM__PROVIDER:-anthropic}
+      # Inner Thought(Tier 0) + Proactive(Tier 1). 기본 on — false로 끌 수 있다.
+      ASH_THOUGHT__ENABLED: ${ASH_THOUGHT__ENABLED:-true}
+      ASH_THOUGHT__MODEL: ${ASH_THOUGHT__MODEL:-}
+      ASH_PROACTIVE__ENABLED: ${ASH_PROACTIVE__ENABLED:-true}
+      # 자율 성찰 daemon — 기본 on (요청 없이 먼저 말 검).
+      ASH_PROACTIVE__DAEMON_ENABLED: ${ASH_PROACTIVE__DAEMON_ENABLED:-true}
+      # postgres가 기본. 외부 DSN이 .env에 있으면 그쪽을 사용한다.
+      ASH_SESSION__PERSISTENCE_BACKEND: postgres
+      ASH_SESSION__POSTGRES_DSN: ${ASH_SESSION__POSTGRES_DSN:-postgresql://ash:ash@postgres:5432/ash}
+      # 재시작해도 이어지는 실행 상태(알림 보류 큐, 위임 그래프와 작업 기록). 세션과 같은 DSN 을 쓴다
+      ASH_SCHEDULER__NOTICE_BACKEND: postgres
+      ASH_WORKFLOW__BACKEND: postgres
+      # 프로필 디렉터리(ASH_PROFILE_DIR, 기본은 저장소의 examples/)를 /app/profile 로 마운트한다.
+      # 팀 에이전트, sub-agent, 스킬, 확장, main 의 이름과 말투(settings.yaml)를 여기서 읽는다
+      ASH_TEAM__DIR: /app/profile/team
+      ASH_AGENTS__AGENTS_DIR: /app/profile/team/agents
+      ASH_PLUGIN__SKILLS_DIR: /app/profile/skills
+      ASH_PLUGIN__EXTENSIONS_DIR: /app/profile/extensions
+      ASH_PROFILE_SETTINGS_FILE: /app/profile/settings.yaml
+      # MCP 도구 컨테이너(ash-mcp)의 서버 목록. 새 서버는 mcp/servers.yaml 과 여기(또는 .env)에 한 항목씩
+      ASH_MCP_SERVERS: ${ASH_MCP_SERVERS:-[{"name":"google","transport":"streamable-http","url":"http://ash-mcp:8000/mcp","timeout":60},{"name":"docs","transport":"streamable-http","url":"http://ash-mcp:8001/mcp","timeout":180}]}
+      # 내장 도구의 실행 전 승인. MCP 도구(Google 쓰기 계열 등)의 승인은 MCP 정책(~/.ash/mcp_policy.yaml)이 정한다
+      ASH_SECURITY__REQUIRE_APPROVAL_FOR: ${ASH_SECURITY__REQUIRE_APPROVAL_FOR:-["bash","write_file","edit_file"]}
+    volumes:
+      - ash_data:/root/.ash
+      # 성찰이 주기적으로 훑는 외부 소스 선언(MCP 도구 호출). 개인 값(라벨, 계정)이 들어가 *.yaml 은 git 밖이다. 예시는 *.yaml.example
+      - ./mcp/external_sources:/root/.ash/external_sources:ro
+      # 미디어 결과물 폴더. 확장이나 외부 워커가 쓴 영상, 음악, 이미지를 HUD 가 /data/creative 에서 읽어 보여 준다
+      - ${ASH_CREATIVE_DIR:-~/Creative/ash}:/data/creative
+      # 로컬 코드를 그대로 쓴다 — 파이썬 수정 후 이미지 재빌드 없이
+      # `docker compose restart ash-backend` 만으로 반영된다.
+      - ./src:/app/src
+      # 개인 프로필 저장소. 비우면 저장소의 예시(examples/)를 쓴다
+      - ${ASH_PROFILE_DIR:-./examples}:/app/profile:ro
+      # 음성 모델(TTS, 문구, 웨이크워드). git 에는 없고 각자 채운다. 없으면 그 기능만 꺼진다
+      - ./models:/app/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # MCP 도구는 기동 때 한 번 열거한다. 먼저 떠 있어야 첫 기동부터 도구가 붙는다
+      ash-mcp:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["web"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost', 7777), timeout=2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  # ── Web HUD 프론트엔드 (nginx 정적 파일 + /ws 프록시) ─────────────────────────
+  ash-frontend:
+    image: nginx:alpine
+    ports:
+      # 루프백에만 연다. 같은 Wi-Fi 의 기기도 키만 맞추면 들어오던 것을 막고, 집 밖에서는 tailscale serve 로만 들어온다
+      - "127.0.0.1:7777:80"
+    volumes:
+      - ./src/ash_industry/ui/web/static:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # 모바일 앱 빌드 결과를 /m/ 로 서빙한다. 앱 레포에서 npm run build 만 하면 새 파일이 나간다
+      - ${ASH_APP_DIST:-../ash-industry-app/dist}:/usr/share/nginx/mobile:ro
+    depends_on:
+      ash-backend:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["web"]
+
+  # ── Docker 소켓 프록시 (Ion 의 재기동 권한) ─────────────────────────
+  # 컨테이너에 소켓을 직접 주면 호스트 root 와 같다. 프록시는 조회와 restart, stop 만 연다
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: "1"
+      POST: "1"
+      ALLOW_RESTARTS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    profiles: ["web"]
+
+  # ── Ion (백엔드 밖의 감시자) ─────────────────────────────────────────
+  # 백엔드와 Postgres 가 죽어도 뜬다(depends_on 없음). 앱은 nginx 의 /infra/ 로 붙는다
+  # ── MCP 도구 컨테이너. 외부 서비스(Google 등)의 MCP 서버를 여기 하나에 모아 띄우고 백엔드가 HTTP 로 붙는다 ──
+  ash-mcp:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      MCP_GOOGLE_PORT: ${MCP_GOOGLE_PORT:-8808}
+    volumes:
+      # Google OAuth 토큰과 uv 캐시. 컨테이너를 다시 만들어도 로그인을 다시 하지 않는다
+      - mcp_data:/data
+      # 행정문서 폴더. docs MCP 서버는 이 안만 읽고 쓴다(결과는 원본 옆 .edited-<시각>, 렌더는 .render/)
+      - ${ASH_DOCS_DIR:-~/Documents/ash}:/data/documents
+    ports:
+      # Google OAuth 콜백(http://localhost:<MCP_GOOGLE_PORT>/oauth2callback)이 브라우저에서 와야 한다. 호스트 밖에는 열지 않는다
+      - "127.0.0.1:${MCP_GOOGLE_PORT:-8808}:8000"
+    restart: unless-stopped
+    profiles: ["web"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost', 8000), timeout=2); s.close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+  ash-ion:
+    build:
+      context: .
+      target: runtime-web
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      PYTHONUNBUFFERED: "1"
+      ASH_SESSION__POSTGRES_DSN: ${ASH_SESSION__POSTGRES_DSN:-postgresql://ash:ash@postgres:5432/ash}
+      ASH_ION__BACKEND_URL: http://ash-backend:7777
+      ASH_ION__DOCKER_URL: http://docker-socket-proxy:2375
+      ASH_ION__BACKEND_SERVICE: ash-backend
+      # 백엔드 api_keys 중 하나. 백엔드를 부를 때 싣고 /infra 요청에서 검사한다
+      ASH_ION__ACCESS_KEY: ${ASH_ION__ACCESS_KEY:-}
+    # 이미지의 venv python 으로 모듈을 띄운다. uv run 은 기동마다 lock 과 맞추느라 dev 의존성까지 받았다(실측).
+    # src 가 마운트돼 이미지 재빌드 없이 restart 로 반영된다
+    command: ["python", "-m", "ash_industry.ion"]
+    volumes:
+      - ash_data:/root/.ash
+      - ./src:/app/src
+    depends_on:
+      - docker-socket-proxy
+    restart: unless-stopped
+    profiles: ["web"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost', 7778), timeout=2); s.close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  ash_data:
+  postgres_data:
+  mcp_data:

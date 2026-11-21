@@ -1,0 +1,239 @@
+---
+sidebar_position: 0.5
+title: Inner Thought
+---
+
+import InfoInnerThought from '@site/src/figures/info-inner-thought.svg';
+import FigureInnerThought from '@site/src/figures/inner-thought.svg';
+import FigureExpInnerThought from '@site/src/figures/exp-inner-thought.svg';
+
+# Inner Thought
+
+Inner Thought는 사람이 말하기 전에 잠시 생각하듯, main의 즉각적인 응답과는 독립적으로 내재적인 사고를 가능하게 하는 기능이다. 사용자의 입력마다 메인 응답과 별개로 LLM을 한 번 더 불러, 어떤 요청이 들어왔는지와 먼저 응답할지, 또는 뒤에서 별도의 처리를 할지 등등 **사고 프레임**이라는 구조화된 판단로직으로 남긴다.
+
+사고 프레임은 [Proactive Dialogue](./proactive.md) 기능 전체의 입력이 되며 Inner Thought 는 내재화된 알고리즘이다.
+
+<figure className="info-fig">
+  <InfoInnerThought />
+</figure>
+
+## Inner Thought가 주목한 점
+
+한가지 시나리오를 가정해보자. 사용자가 "내일 발표인데 자료가 아직 반밖에 없어" 라고 말했다고 한 경우 기존의 Chatbot은 질문에 답하는 데에만 집중하기 때문에, 그 말에 대한 대답은 바로 할 수 있어도 사용자의 진의를 해석하는데에는 불완전하다. 사용자는 내일이 발표인데 자료가 절반밖에 없다는 task의 진행상황과 불안한 상태를 의미한다. 이를 보완하기 위해서 메인 응답 하나에 해석과 답을 함께 시키는 우회 방안도 있지만, 프롬프트가 길어지고 해석 결과를 다른 기능이 꺼내 쓸 수 없으며, 생각하는 동안 답까지 늦어진다. Ash Industry 는 이러한 부분을 개선하기 위해 요청에 대한 해석을 메인 응답과 떼어 내어 별도의 사고과정으로 두었다. 사고 결과는 구조화된 판단으로 남아 먼저 건네는 말, 약속 추적 같은 다른 기능의 입력이 되고, 답을 늦추지 않도록 사고를 돌리는 시점도 고를 수 있다.
+
+### 어떤 기능을 가지고 있나요?
+#### 사고를 메인 응답과 떼어 낸다
+
+- 사고를 별도 LLM 호출로 떼어 `ThoughtFrame` 이라는 고정 스키마로 받는다. 이 프레임 하나를 💭 표시, 먼저 건네는 말, 사고 기록에 나눠 쓴다.
+- 메인 응답 하나에 "해석하고, 약속을 찾고, 먼저 말할지 정하고, 답하라" 를 모두 시키는 방식.
+- 한 호출에 모두 시키면 프롬프트가 길어지고, 해석 결과를 구조화된 데이터로 꺼낼 수 없다. 떼어 내면 메인 응답은 대화만 다루고, 사고는 작은 모델로 따로 돌릴 수 있다. 약속은 지금은 AGENDA 판단이 따로 잡는다.
+
+#### 작은 모델에는 스키마를 강제한다
+
+- Ollama 의 `format` 으로 `ThoughtFrame` JSON 스키마를 넘기고, 파싱은 관대하게 한다.
+- 프롬프트로 JSON 을 "부탁" 만 하는 방식.
+- 로컬 소형 모델(gemma4:e2b)에 부탁만 했을 때는 요청 사고 2회 중 1회, 성찰 1회 중 0회만 유효한 프레임이 나왔다. 스키마를 넘기자 요청 사고 3회 중 3회, 성찰 2회 중 2회가 유효했다. 그래도 목록 칸에 객체가 오는 식의 어긋남은 남아서, 글자만 건져 프레임을 살린다. 프레임 하나가 깨져도 대화는 계속된다.
+
+#### 시점을 설정으로 둔다
+
+- 사고와 메인 응답의 순서를 before, race, after 중에서 고르게 했다.
+- 처음처럼 before 하나로 고정하는 방식.
+- 사고를 응답 전에 돌리면(before) 해석이 이번 응답에 섞이지만 그만큼 늦다. 로컬 한 GPU 에서 사고와 메인이 GPU 를 나눠 쓰면 병렬(race)이 오히려 느렸다. 당시 측정(gemma4:e4b + e2b, GPU 하나)에서 before 는 전체 27~32초, race 는 첫 글자 21초에 전체 37초, after 는 첫 글자 12.8초에 전체 29초였다. 어느 쪽이 빠른지가 배포 환경에 달려 있어서 설정으로 뺐다. [아래 실험](#사고-시점별-지연)처럼 클라우드에서도 after 가 가장 빨랐다.
+
+## 세부 동작
+
+### 한 눈에 보기
+
+<figure className="paper-fig">
+  <FigureInnerThought />
+  <figcaption><b>Figure 1.</b> (a) 사고 한 번. 다섯 가지 맥락과 페르소나를 템플릿에 채워(1) 도구 없이 사고 모델을 한 번 부르고(2), JSON 스키마로 받은 ThoughtFrame 을 나눠 쓴다(3). 성찰일 때는 외부 이벤트와 먼저 꺼낼 항목(앵커)도 함께 넣는다. decision model 을 쓰면 성찰은 판정이 문턱을 넘을 때만 사고 모델을 부른다. 스키마를 강제하는 것은 Ollama 뿐이고 다른 프로바이더는 파싱만 한다. 약속 저장과 닫기는 ThoughtFrame 이 아니라 AGENDA 판단이 맡는다. router 가 think 로 판정한 턴의 사고는 응답과 함께 돌고, 결과는 다음 턴에 한 번 들어간다. (b) 사고와 메인 응답의 순서. `router_model` 을 정하면 이 설정 대신 router 가 턴마다 정한다. before 는 해석이 이번 응답에 섞이고, race(기본)는 3초까지만 기다리며, after 는 같은 GPU 를 나눠 쓰는 로컬에서 가장 빠르다.</figcaption>
+</figure>
+
+```mermaid
+flowchart LR
+  IN[사용자 입력] --> R[템플릿 렌더]
+  OL[(open loops)] --> R
+  UM[(사용자 모델)] --> R
+  MEM[(회상 5건)] --> R
+  HIS[최근 8턴 x 240자] --> R
+  R --> LLM[사고 모델 호출<br/>JSON 스키마, Ollama 는 강제]
+  LLM --> P{파싱}
+  P -- 유효 --> F[ThoughtFrame]
+  P -- 행동 후보만 틀림 --> F2[후보 버리고 프레임 유지]
+  P -- 전체 틀림 --> N[None, 로그]
+  F --> E[inner_thought 이벤트 💭]
+  F --> C[composer → 시스템 프롬프트 블록]
+  F --> D[dual channel 판단]
+```
+
+`agent_layer/thought/engine.py` 의 `InnerThoughtEngine.think` 가 아래 순서로 사고 한 번을 처리한다.
+
+1. 생략: 요청 입력이 `ASH_THOUGHT__SKIP_IF_SHORTER_THAN`(기본 0, 끔)보다 짧으면 사고하지 않고 None 을 돌려준다. 성찰에는 적용하지 않는다.
+2. 회상: `MemoryService.recall_messages` 로 입력과 관련된 기억을 `recall_limit`(5)만큼 가져온다.
+3. 렌더: 요청 템플릿(`~/.ash/inner_thought.md`, 없으면 내장 기본)에 `persona`, `now`, `open_loops`, `recalled_memories`, `history`, `user_input`, `user_model` 을 채운다. 히스토리는 최근 `history_turns`(8) 턴을, 턴당 `history_chars`(240) 자까지 넣는다.
+4. 호출: 도구 없이 사고 모델을 한 번 부른다. Ollama 프로바이더는 프레임의 JSON 스키마를 `format` 으로 넘겨 형식을 강제한다.
+5. 파싱: 첫 `{` 부터 마지막 `}` 까지 잘라 검증한다. `proactive_actions` 만 틀리면 그 항목만 버리고 프레임을 살린다. `recalled`, `options` 에 객체가 와도 글자만 건진다.
+6. 기록: 세션이 `inner_thought` 이벤트를 내고, 사고 로그 싱크(`ASH_THOUGHT__LOG_SINKS`, 기본 `ltm`)에 남긴다(`ltm` 이면 일화 기억으로, `stm` 이면 작업 메모로). 싱크 하나가 실패해도 턴은 계속된다.
+
+### 사고 프레임
+
+사고 프레임(`ThoughtFrame`)은 JSON 이다. 키 이름은 고정이고, 사용자는 프롬프트 템플릿으로 키가 채워지는 방식만 조정한다.
+
+| 필드 | 뜻 |
+|---|---|
+| `observation` | 무엇이 들어왔는가(사실) |
+| `interpretation` | 의도, 감정, 숨은 요구. 사용자를 3인칭으로 분석한 문장 |
+| `recalled` | 회상한 기억 요약 |
+| `options` | 가능한 대응 후보 |
+| `proactive_actions` | 미리 해 두면 좋을 행동. `kind`(suggest, tool, remember, schedule), `tool_name`, `args`, `risk`(low, high) |
+| `decision` | `act`, `ask`, `silent`. 확신 없으면 silent |
+| `confidence` | 0 에서 1 |
+| `rationale` | 결정 근거 |
+| `utterance` | 사용자에게 실제로 건넬 말. 비어 있으면 침묵 |
+| `needs_background`, `filler` | 오래 걸릴 작업이면 true 와 즉답 문구 |
+
+약속(open loop)은 사고 프레임에 없다. 요청마다 사고와 따로 도는 AGENDA 판단이 잡고 닫는다. router 가 사고를 건너뛴 요청에서도 약속을 놓치지 않기 위해서다. 사고는 열린 약속을 맥락으로 보기만 한다.
+
+`utterance` 와 `interpretation` 을 나눈 것은 해석문을 그대로 말하면 안 되기 때문이다. 해석문은 "사용자가 불안해한다" 같은 문장이므로, 먼저 건네는 말에는 `utterance` 만 쓴다.
+
+### 사고 결과가 가는 곳
+
+- **composer**: `[내적 사고] 해석: ... 회상: ... 고려한 대응: ...` 블록을 만들어 메인 호출의 시스템 프롬프트 끝에 붙인다. 이 블록은 히스토리에 남지 않는다. `interpretation_only` 로 바꾸면 해석 한 줄만 붙인다
+- **dual channel**: `needs_background` 면 filler 를 먼저 말하고 메인 응답은 뒤에서 돈다. 흐름은 [Dual channel](./proactive.md#dual-channel) 에 있다
+- **화면**: 💭 한 줄로 decision 과 확신도를 보여 준다. 클릭하면 해석 전문이 열린다
+
+### 시점: before, race, after
+
+사고와 메인 응답을 어떤 순서로 돌릴지는 `ASH_THOUGHT__REQUEST_TIMING` 이 정한다.
+
+```mermaid
+gantt
+  dateFormat X
+  axisFormat %s
+  section before
+  사고        :a1, 0, 10
+  메인 응답    :a2, 10, 30
+  section race (wait 3초)
+  사고        :b1, 0, 10
+  메인 응답    :b2, 3, 25
+  section after
+  메인 응답    :c1, 0, 20
+  사고        :c2, 20, 30
+```
+
+- `before`: 사고를 끝낸 뒤 응답한다. 해석이 이번 응답에 섞인다
+- `race`(기본): `wait_sec` 까지만 기다린다. 사고가 늦으면 응답을 먼저 시작하고, 사고는 뒤에서 끝나 💭 표시와 사고 기록에만 쓰인다
+- `after`: 응답이 끝난 뒤 사고한다. 사고와 메인이 같은 GPU 를 나눠 쓰는 로컬 Ollama 에서는 이 방식이 가장 빠르다
+
+늦은 사고는 세션이 task 로 들고 있다가, 끝나면 기록과 이벤트를 남긴다. 실패하면 `[Thought] request thought failed` 로그가 남는다.
+
+:::note
+
+`race` 에서 늦게 끝난 사고와 `after` 의 사고는 이번 응답에 들어가지 않는다. 해석이 매 응답에 반드시 섞여야 하면 `before` 를 쓴다.
+
+:::
+
+### Thought Router
+
+`ASH_THOUGHT__ROUTER_MODEL` 을 지정하면 위 시점 설정 대신 router decision model 이 요청마다 사고가 필요한지 정한다.
+
+```mermaid
+flowchart LR
+  IN[사용자 입력] --> RT{router<br/>P think}
+  RT -- direct --> M[바로 응답]
+  RT -- think --> M
+  RT -- think --> T[사고, 응답과 함께]
+  T --> NX[다음 턴 시스템 프롬프트에 한 번]
+  IN --> AG[AGENDA 판단, 응답과 함께]
+  AG --> OL[(open loops)]
+```
+
+1. 판정: router 에 같은 요청을 두 번 묻는다. 한 번은 맥락 없이, 한 번은 직전 두 턴(사용자 말과 그 뒤 마지막 글 응답, 응답은 400자까지)을 붙여서. 둘 중 큰 P(think) 가 `ROUTER_THRESHOLD`(0.2) 이상이면 think 다
+2. 응답: 어느 쪽이든 사고를 기다리지 않고 바로 답한다
+3. 사고: think 일 때만 응답과 함께 돈다. 결과는 이번 응답이 아니라 다음 응답의 시스템 프롬프트에 한 번 들어가고 비워진다. 응답 뒤에도 사고가 돌면 화면의 구체는 thinking 을 유지한다
+4. 약속: 판정과 상관없이 [AGENDA 판단](./open-loop.md) 이 응답과 함께 돈다
+
+두 번 묻는 이유: 맥락을 붙이면 router 가 앞 주제를 따라가, 회의 아젠다를 만든 직후의 "만들어 달라고" 를 think(0.90)로, "종료" 직후의 "오픈소스 분석해줘" 를 direct(0.002)로 본다. 맥락을 빼면 계획을 제안한 뒤의 "응 진행해" 같은 후속 말을 놓친다. 두 판정 중 큰 값을 쓰는 방식의 근거는 [Thought Router 판정 실험](#thought-router-판정)에 있다.
+
+router 가 1초(`ROUTER_TIMEOUT_SEC`) 안에 답하지 않거나 서버가 없으면 think 로 둔다. 사고를 잘못 건너뛰는 것보다 쓸데없이 한 번 더 하는 쪽이 낫다.
+
+router 는 Ollama 로 띄울 수 없다(판정 head 를 읽지 못한다). LLMClick 체크아웃에서 `scripts/router_server.py` 를 띄우면 System One API(`/v1/systemone`, `choice` 질문)로 11435 포트에서 답한다.
+
+### 사고 모델
+
+사고 모델은 메인 모델과 따로 둘 수 있다. `ASH_THOUGHT__MODEL`, `__PROVIDER`, `__API_KEY`, `__BASE_URL` 중 지정한 것만 바뀌고, 나머지는 메인 값을 상속한다. temperature 와 max_tokens 는 항상 메인 값을 쓴다.
+
+### 템플릿 직접 쓰기
+
+요청용 템플릿은 `~/.ash/inner_thought.md`, 성찰용 템플릿은 `~/.ash/inner_thought_reflection.md` 에 직접 쓴다. 자리표시자는 `{{persona}}`(에이전트 말투), `{{now}}`, `{{open_loops}}`, `{{external_events}}`, `{{recalled_memories}}`, `{{history}}`, `{{user_input}}`, `{{user_model}}`, `{{recent_proactive}}`(성찰 전용, 최근 먼저 건넨 말)이다. 없는 값은 빈 문자열이 된다. 외부 이벤트, 말투, 최근 먼저 건넨 말이 있는데 템플릿에 자리가 없으면, 끝에 덧붙여 빠지지 않게 한다. 성찰에서 decision model 이 고른 앵커는 자리표시자가 아니라 `[먼저 꺼낼 항목]` 줄로 항상 끝에 덧붙는다([Proactive Dialogue](./proactive.md)).
+
+:::warning
+
+프레임 키 중 `utterance` 가 빠지면 먼저 건네는 말이 꺼진 것과 같다.
+
+:::
+
+### 한계
+
+- `race` 에서 늦게 끝난 사고, `after` 의 사고, router 가 띄운 사고는 이번 응답에 들어가지 않는다.
+- JSON 스키마를 강제하는 것은 Ollama 프로바이더뿐이다. 다른 프로바이더는 파싱만 한다.
+- router 는 Ollama 로 띄울 수 없어 별도 서버가 필요하다. 서버가 없으면 매 요청을 think 로 둔다.
+
+### 구현 위치
+
+왼쪽이 사용자와 화면, 가운데가 코드 모듈, 오른쪽이 저장소다. 화살표는 호출이나 데이터의 방향이다.
+
+```mermaid
+flowchart LR
+  SES[AgentSession] --> ENG[InnerThoughtEngine<br/>thought/engine.py]
+  ENG --> TPL[ThoughtPromptTemplate<br/>prompt.py]
+  ENG --> REC[recall 콜백<br/>MemoryService.recall_messages]
+  ENG --> TM[사고 모델<br/>메인과 따로 둘 수 있음]
+  ENG --> FR[ThoughtFrame]
+  FR --> CMP[ThoughtComposer<br/>시스템 프롬프트 블록]
+  FR --> LOG[ThoughtLog<br/>ltm, stm 싱크]
+  FR --> PRO[ProactivityCore]
+  FR -. inner_thought .-> HUD[💭]
+  USERTPL[(~/.ash/inner_thought.md)] --> TPL
+  LOG --> MEM[(메모리)]
+```
+
+- 핵심 모듈: `agent_layer/thought/engine.py`
+- 저장: 사고 로그(일화 기억 또는 작업 메모)
+
+## Performance Experiments
+
+사고를 언제 돌릴지, 모델마다 사고가 믿을 만한지, router 가 사고를 맞게 거르는지를 한눈에 보기 쉽도록 정리했다.
+
+### 사고 시점별 지연
+
+- **질문**: 사고를 응답 전(before), 응답과 동시(race), 응답 뒤(after)에 돌릴 때 첫 글자와 응답 끝이 각각 언제 오는가.
+- **설정**: 떠 있는 백엔드에 새 세션으로 질문 넷을 보내 첫 글자와 응답 끝, 💭 도착 시각을 잰다. 로컬은 메인 gemma4:e4b, 사고 gemma4:e2b, 같은 Mac 의 GPU 하나다. `ASH_THOUGHT__REQUEST_TIMING` 만 바꿔 가며 돌렸다.
+- **결과**: Figure 2 (a).
+
+<figure className="paper-fig">
+  <FigureExpInnerThought />
+  <figcaption><b>Figure 2.</b> (a) 로컬과 클라우드 모두 after 가 첫 글자와 응답 끝이 가장 빠르다. 로컬 race 는 응답 끝이 가장 늦다. 사고와 메인이 GPU 를 나눠 쓰기 때문으로 보인다(추정). (b) 세 모델 모두 프레임은 매번 유효하고, 약속을 잡는 성향은 모델마다 다르다.</figcaption>
+</figure>
+
+- **해석**: 로컬에서 after 는 첫 글자 2.3초, before 는 15.6초다. 대신 after 의 💭 는 응답이 끝난 뒤(질문부터 약 23초) 온다. 클라우드도 after 가 가장 빨랐다(첫 글자 0.9초). 그래서 설정 예시(`.env.example`)가 권하는 값과 지금 쓰는 설정은 after 다. 코드 기본값은 race 다.
+- **한계**: 질문 4개의 중앙값이다. 로컬 수치는 하드웨어와 Ollama 의 모델 적재 상태에 따라 크게 달라진다.
+- **재현**: `uv run python -m scripts.experiments.agent_turns timing --n 4`(`ASH_THOUGHT__REQUEST_TIMING` 을 바꿔 가며).
+
+### 요청 사고의 프레임 유효성과 약속 판단
+
+- **질문**: 모델마다 요청 사고가 유효한 프레임을 내는가, 그리고 AGENDA 판단이 약속을 얼마나 맞게 잡는가.
+- **설정**: 사용자 입력 12개(약속이 있는 6개, 없는 6개)를 사고 엔진과 AGENDA 판단에 2회씩 넣는다. 화면과 메인 응답은 거치지 않는다. 모델은 gemma4:e2b, gemma4:e4b, gpt-4o-mini 다.
+- **결과**: Figure 2 (b). 세 모델 모두 프레임은 매번 유효하다.
+- **해석**: 작은 e2b 가 약속을 모두 잡았지만, 약속이 없는 말에서도 약속을 만들었다(precision 0.71). 이렇게 잘못 만든 약속은 [Open loop](./open-loop.md) 의 저장 판정(입력과의 글자 겹침, 근거 인용)을 한 번 더 거친다. e4b 와 gpt-4o-mini 는 약속을 덜 잡는 대신(recall 0.75) 잘못 만든 약속이 없다.
+- **한계**: 사례가 12개로 작다. 처음 데이터에는 "이번 달 안에 헬스장 등록하려고" 처럼 약속인지 의도인지 애매한 문장이 있어 e4b 의 recall 이 0.58 로 나왔다. 위 값은 그 문장을 "25일까지 등록하기로 친구랑 약속했어" 로 바꾼 뒤의 값이다.
+- **재현**: `uv run python -m scripts.experiments.thought_frames --model gemma4:e2b-it-qat`.
+
+### Thought Router 판정
+
+- **질문**: router 가 사고가 필요한 요청(think)과 바로 답해도 되는 요청(direct)을 맞게 가르는가. 맥락을 붙인 판정 하나와 두 판정 중 큰 값 중 어느 쪽이 나은가.
+- **설정**: 실제 운영 대화 30건(애매한 4건 제외)을 router 에만 넣는다. 원문은 저장소에 두지 않는다.
+- **결과**: 맥락을 붙인 판정의 정확도는 0.70 이다. 두 판정 중 큰 값을 임계 0.2 로 쓰면 사고가 필요한 요청을 모두 잡았다(think 재현율 1.0, direct 재현율 0.68).
+- **해석**: 사고를 잘못 건너뛰는 것보다 쓸데없이 한 번 더 하는 쪽이 낫다고 보고, think 를 놓치지 않는 "두 판정 중 큰 값, 임계 0.2" 를 기본으로 정했다.
+- **한계**: 라벨은 사람이 아니라 Claude 가 router 학습 기준 문구로 매겼다. 30건은 작은 표본이다.
+- **재현**: `uv run python -m scripts.experiments.thought_router --policy max --threshold 0.2`.

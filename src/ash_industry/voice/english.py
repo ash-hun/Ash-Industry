@@ -1,0 +1,78 @@
+"""[voice] main 에이전트가 소리 내는 한국어 글을 영어 TTS 로 읽으려고 소리로만 짧은 영어 구어체로 옮긴다."""
+
+import re
+import asyncio
+from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+
+from ash_industry.voice.voice_service import is_english
+from ash_industry.memory.scope import MAIN_AGENT
+
+if TYPE_CHECKING:
+    from ash_industry.model_layer.model_types import ModelConfig
+
+TIMEOUT_SEC = 8.0
+# 옮기지 못했을 때 읽는 말. 한국어 원문을 다른 목소리로 읽지 않고 화면을 보게 한다
+FALLBACK_LINE = "I've put it on your screen."
+# 말투 설정(voice.english_style)이 비었을 때
+DEFAULT_STYLE = "a calm, polite assistant"
+# 길게 옮기면 읽는 데 오래 걸린다. 긴 답은 요점만
+MAX_WORDS = 45
+# 문장 끝 뒤의 공백에서 나눈다. 이보다 짧은 조각은 앞 문장에 붙인다("Yes, sir." 같은 조각이 따로 읽히면 끊겨 들린다)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+MIN_PART_WORDS = 4
+
+_PROMPT = """\
+Below is what you are about to say to the user, written in Korean.
+Say it out loud in English, in this voice: {style}.
+- At most two short sentences and {max_words} words. If it is long, give only the conclusion and the key numbers.
+- Keep names, numbers, dates and times exact. Spoken words only: no lists, markdown, emoji, URLs or code.
+- Output only the English line, nothing else.
+
+Korean:
+{text}"""
+
+Translate = Callable[[str], Awaitable[str | None]]
+
+
+def should_speak_english(text: str, agent_id: str) -> bool:
+    """main 이 내는 한국어 글은 무엇이든(답, 🔔, filler, 앞으로 생길 종류) 옮긴다. 다른 에이전트는 원문 그대로."""
+    return agent_id == MAIN_AGENT and bool(text.strip()) and not is_english(text)
+
+
+def clean_english(raw: str) -> str | None:
+    """모델 답에서 읽을 영어 한 줄. 따옴표를 벗기고, 영어가 아니면(한글이 섞이면) None. 순수 함수."""
+    line = " ".join(raw.split()).strip().strip('"').strip("“”").strip()
+    return line if line and is_english(line) else None
+
+
+def split_sentences(text: str) -> list[str]:
+    """영어 글을 읽을 문장 단위로. 문장마다 따로 합성해, 한 문장이 실패해도 다음 문장은 읽는다. 순수 함수."""
+    # ponytail: "3 p.m. today" 같은 약어 마침표에서도 나뉜다, 끊겨 들린다는 말이 나오면 약어 목록을 둔다
+    parts: list[str] = []
+    for piece in _SENTENCE_END.split(" ".join(text.split())):
+        if parts and len(piece.split()) < MIN_PART_WORDS:
+            parts[-1] = f"{parts[-1]} {piece}"
+        elif piece:
+            parts.append(piece)
+    return parts
+
+
+def make_llm_translator(
+    model: "ModelConfig", style: str = DEFAULT_STYLE, timeout: float = TIMEOUT_SEC
+) -> Translate:
+    """실패, 시간 초과, 영어가 아닌 답은 None. 부른 쪽이 원문으로 읽는다."""
+
+    async def translate(text: str) -> str | None:
+        from ash_industry.model_layer.model_types import LLMContext, StreamOptions, UserMessage
+        from ash_industry.model_layer.stream import stream_to_message
+
+        prompt = _PROMPT.format(text=text, max_words=MAX_WORDS, style=style or DEFAULT_STYLE)
+        ctx = LLMContext(messages=[UserMessage(content=prompt)], tools=None)
+        try:
+            msg = await asyncio.wait_for(stream_to_message(model, ctx, StreamOptions()), timeout)
+        except Exception:
+            return None
+        return clean_english(msg.text() or "")
+
+    return translate

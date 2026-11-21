@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <title>Ash Industry</title>
+  <style>
+    :root { --bg: #14161a; --fg: #e6e8ea; --dim: #7d8288; --faint: #3a3d42; --core: #f0642d; --err: #f05f5f; }
+    html, body { height: 100%; }
+    body { margin: 0; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+           font: 12px/1.7 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: .04em;
+           transition: opacity .6s ease; }
+    /* boot_sequence.js 의 EXIT_FADE_MS 와 같은 시간에 어두워진다 */
+    body.exit { opacity: 0; }
+    main { width: min(440px, calc(100vw - 32px)); text-align: center; }
+    .mark { position: relative; width: 132px; height: 132px; margin: 0 auto 18px; }
+    .mark svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .ring circle { fill: none; stroke: var(--faint); stroke-width: 1.5; }
+    .ring .arc { stroke: var(--core); stroke-dasharray: 90 540; stroke-linecap: round; }
+    #ring { transform-origin: 50% 50%; animation: spin 1.6s linear infinite; }
+    .blade { fill: var(--fg); }
+    .core { fill: var(--core); transition: fill .3s ease; }
+    .glow { fill: var(--core); opacity: .4; animation: pulse 1.4s ease-in-out infinite alternate; }
+    h1 { margin: 0; font-size: 13px; font-weight: 500; letter-spacing: .42em; }
+    #status { margin: 4px 0 18px; color: var(--dim); letter-spacing: .3em; font-size: 11px; min-height: 1.7em; }
+    #log { margin: 0 auto; padding: 0; list-style: none; text-align: left; width: fit-content; max-width: 100%;
+           color: var(--dim); min-height: 5.1em; }
+    #log li { white-space: pre-wrap; overflow-wrap: anywhere; animation: line-in .25s ease-out both; }
+    #log .tag { color: var(--fg); }
+    #log .tag.ok { color: var(--core); }
+    #log .tag.fail { color: var(--err); }
+    #msg { margin: 16px 0 0; color: var(--err); white-space: pre-wrap; overflow-wrap: anywhere; }
+    #msg:empty { display: none; }
+
+    body.online #status { color: var(--core); }
+    body.online #ring { animation-duration: .7s; }
+    body.online .glow { animation: none; opacity: 1; }
+    #ring.stop { animation: none; }
+    #ring.stop .arc { stroke: var(--err); }
+    body.error .core { fill: var(--err); }
+    body.error .glow { animation: none; opacity: 0; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { to { opacity: 1; } }
+    @keyframes line-in { from { opacity: 0; transform: translateY(3px); } }
+    @media (prefers-reduced-motion: reduce) {
+      body { transition: none; }
+      #ring, .glow, #log li { animation: none !important; }
+      .glow { opacity: .8; }
+    }
+    /* 제목 표시줄이 없는 창이라 위쪽 띠를 잡고 끈다 */
+    .drag { position: fixed; top: 0; left: 0; right: 0; height: 52px; -webkit-app-region: drag; }
+  </style>
+</head>
+<body>
+  <div class="drag"></div>
+  <main>
+    <div class="mark" aria-hidden="true">
+      <svg class="ring" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="96"></circle>
+        <g id="ring"><circle class="arc" cx="100" cy="100" r="96"></circle></g>
+      </svg>
+      <svg viewBox="-200 -213.4 400 400">
+        <defs>
+          <filter id="bloom" x="-200%" y="-100%" width="500%" height="300%"><feGaussianBlur stdDeviation="14"></feGaussianBlur></filter>
+        </defs>
+        <g transform="scale(.78)">
+          <polygon class="blade" points="-4,-200 -100,173.2 -56,111.8 -4,-77.9"></polygon>
+          <polygon class="blade" points="4,-200 100,173.2 56,111.8 4,-77.9"></polygon>
+          <polygon class="blade" points="-45.5,-89 -104,-69.3 -90.6,86.1"></polygon>
+          <polygon class="blade" points="45.5,-89 104,-69.3 90.6,86.1"></polygon>
+          <polygon class="glow" filter="url(#bloom)" points="0,-10 16,40 0,125 -16,40"></polygon>
+          <polygon class="core" points="0,-10 16,40 0,125 -16,40"></polygon>
+        </g>
+      </svg>
+    </div>
+    <h1>ASH INDUSTRY</h1>
+    <p id="status">BOOTING</p>
+    <ol id="log" aria-live="polite"></ol>
+    <p id="msg"></p>
+  </main>
+  <script>
+    // 줄은 메인 프로세스가 보낸 실제 단계로만 늘어난다. 글은 모두 textContent 로 넣는다
+    const ORDER = ['shell', 'connecting', 'online', 'exit'];
+    const LINES = {
+      shell: ['ok', 'shell started'],
+      connecting: ['..', 'connecting backend'],
+      online: ['ok', 'backend online'],
+    };
+    const log = document.getElementById('log');
+    const status = document.getElementById('status');
+    const msg = document.getElementById('msg');
+    const ring = document.getElementById('ring');
+    let shown = -1;
+
+    function addLine(tag, text, kind) {
+      const li = document.createElement('li');
+      const t = document.createElement('span');
+      t.className = `tag ${kind}`;
+      t.textContent = `[${tag.padStart(3).padEnd(4)}]`;
+      li.append(t, ` ${text}`);
+      log.append(li);
+    }
+
+    function renderStage(stage, detail) {
+      const line = LINES[stage];
+      if (line) addLine(line[0], detail && stage === 'connecting' ? `${line[1]} · ${detail}` : line[1], line[0] === 'ok' ? 'ok' : '');
+      if (stage === 'online') {
+        document.body.classList.remove('error');
+        ring.classList.remove('stop');
+        msg.textContent = '';
+        document.body.classList.add('online');
+        status.textContent = 'SYSTEM ONLINE';
+      }
+      if (stage === 'exit') document.body.classList.add('exit');
+    }
+
+    // 같은 단계가 당김(sync)과 밀어줌(push)으로 두 번 와도 줄은 한 번만 생긴다. 뒤로는 가지 않는다
+    function apply(next) {
+      const idx = ORDER.indexOf(next.stage);
+      if (idx < 0) return;
+      for (let i = shown + 1; i <= idx; i += 1) renderStage(ORDER[i], next.detail);
+      shown = Math.max(shown, idx);
+    }
+
+    const err = new URLSearchParams(location.search).get('error');
+    if (err) {
+      apply({ stage: 'connecting', detail: '' });
+      addLine('fail', 'backend unreachable · retry in 5s', 'fail');
+      msg.textContent = err;
+      status.textContent = 'OFFLINE';
+      document.body.classList.add('error');
+      ring.classList.add('stop');
+    } else {
+      apply({ stage: 'shell', detail: '' });
+    }
+
+    const bridge = window.ashDesktop;
+    if (bridge && bridge.syncBoot) {
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      bridge.onBootStage(apply);
+      bridge.syncBoot({ reducedMotion }).then((now) => {
+        if (now) apply(now);
+      }).catch(() => {});
+    }
+  </script>
+</body>
+</html>

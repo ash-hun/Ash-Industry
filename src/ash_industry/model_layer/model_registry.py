@@ -1,0 +1,48 @@
+"""[model_layer] 이름으로 LLM 프로바이더를 등록하고 조회하는 레지스트리를 제공한다."""
+
+from ash_industry.model_layer.providers.provider_base import Provider
+
+
+class ProviderRegistry:
+    """프로바이더 등록/조회 레지스트리. 먼저 등록한 쪽이 이긴다(first-registration-wins)."""
+
+    def __init__(self) -> None:
+        self._providers: dict[str, Provider] = {}
+
+    def register(self, provider: Provider) -> None:
+        if provider.provider_name not in self._providers:
+            self._providers[provider.provider_name] = provider
+
+    def get(self, name: str) -> Provider:
+        if name not in self._providers:
+            raise KeyError(f"Provider '{name}' not registered. Available: {list(self._providers)}")
+        return self._providers[name]
+
+    def list_names(self) -> list[str]:
+        return list(self._providers.keys())
+
+
+def build_default_registry() -> ProviderRegistry:
+    from ash_industry.model_layer.providers.anthropic import AnthropicProvider
+    from ash_industry.model_layer.providers.gemini import GeminiProvider
+    from ash_industry.model_layer.providers.ollama import OllamaProvider
+    from ash_industry.model_layer.providers.openai import OpenAIProvider
+    from ash_industry.model_layer.providers.vllm import VLLMProvider
+
+    registry = ProviderRegistry()
+    registry.register(AnthropicProvider())
+    registry.register(OpenAIProvider())
+    registry.register(OllamaProvider())
+    registry.register(VLLMProvider())
+    registry.register(GeminiProvider())
+    return registry
+
+
+_default_registry: ProviderRegistry | None = None
+
+
+def get_default_registry() -> ProviderRegistry:
+    global _default_registry
+    if _default_registry is None:
+        _default_registry = build_default_registry()
+    return _default_registry

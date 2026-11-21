@@ -1,0 +1,939 @@
+"""[memory] MemoryService 로 턴 전 변환(observe), 범위를 아는 조회(recall, recent), 쓰기(remember), 공고화를 맡는다."""
+
+import re
+import time
+import asyncio
+import hashlib
+from typing import Any
+from datetime import datetime
+from collections.abc import Mapping
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from collections.abc import Awaitable, Callable
+
+from ash_industry.memory.long_term.task_pattern import (
+    SAVE_HINT,
+    SAVE_HINT_HEADER,
+    TASK_PATTERN_SOURCE,
+    TaskPattern,
+    best_matches,
+    from_item,
+    pattern_id,
+    render_block,
+    teaches,
+)
+from ash_industry.memory.long_term.fact_source import (
+    SOURCE_EPISODE,
+    nearest_episode,
+    pick_source,
+    source_excerpt,
+)
+from ash_industry.memory.retrieval.scoring import DEFAULT_PARAMS, ScoringParams, joint_rank, rank, relevance
+from ash_industry.memory.stores.store_protocol import CORRECTION, OUTCOME, TASK_TYPE, ItemFilter, ItemStore
+from ash_industry.memory.long_term.semantic import mark_interference, prepare_fact, supersede_conflicts
+from ash_industry.memory.memory_types import REFERENT, TURN_INDEX, TURN_PART, MemoryItem, MemoryKind
+from ash_industry.memory.retrieval.timeline_build import is_aggregate, mentions, render_timeline
+from ash_industry.memory.scope import MemoryScope, current_task, scope_from_context, task_scope
+from ash_industry.memory.consolidation.semantic_extract import Fact, FactExtractor
+from ash_industry.memory.retrieval.coverage_grade import merge_coverage, uncovered
+from ash_industry.memory.long_term.refine import CHAT_TASK, Candidate, candidates
+from ash_industry.memory.long_term.procedural import ProceduralSource, Procedure
+from ash_industry.memory.retrieval.coverage_extract import EntityExtractor
+from ash_industry.memory.long_term.correction_detect import is_correction
+from ash_industry.memory.working.state import WorkingState, WorkingStore
+from ash_industry.memory.access import MemoryPolicy, Readable, resolve
+from ash_industry.memory.working.in_memory import InMemoryWorkingStore
+from ash_industry.memory.working.window import last_turns, turn_starts
+from ash_industry.model_layer.model_types import Message, UserMessage
+from ash_industry.memory.long_term.episodic import prepare_episode
+from ash_industry.memory.working.deixis import retrieval_query
+from ash_industry.model_layer.embeddings import Embedder
+from ash_industry.common.logger import get_logger
+
+logger = get_logger(__name__)
+
+FACTS_HEADER = "[핵심 사실]"  # 고정 블록: 질의와 무관하게 항상 넣는 상위 의미 사실
+LTM_HEADER = "[장기 기억]"  # 회상 블록: 이번 질의로 떠오른 항목
+PROCEDURES_HEADER = "[절차 기억]"  # 질의가 가리키는 스킬
+TASK_HEADER = "[작업 공유 메모리]"  # 같은 오케스트레이션 작업의 다른 에이전트가 남긴 결과
+CONSOLIDATED = "consolidated"  # 의미 추출을 마친 일화에 남기는 metadata 키
+TURN_SOURCE = "turn"  # 턴 끝에 남기는 EDM 일화
+TURN_CHARS = 1000  # 턴 일화에 남기는 발화와 답의 최대 글자 수. 도구 결과는 남기지 않는다
+USER_PREFIX = "사용자: "
+TURN_USER_CHARS = "user_chars"  # 턴 일화 content 에서 사용자 발화가 차지하는 글자 수(접두어 뒤)
+# 긴 답의 TURN_CHARS 뒤를 문단 단위로 나눠 남기는 조각 일화. 자르면 그 뒤의 증거는 구성 단계에서 사라져
+# 검색으로 되찾을 수 없다(Memory Tax, He et al. 2026). 공고화와 절차 정제는 본 턴 일화만 본다
+TURN_PART_SOURCE = "turn_part"
+TURN_PARTS = "parts"  # 턴 일화 metadata 의 조각 수. 다시 쓸 때 줄어든 조각을 지우는 데 쓴다
+# 답 약 3,000자까지. LongMemEval-s 정답 턴은 조각 1개로 보존율 92% 가 100% 가 됐다. 2개는 더 긴 답의 여유이고
+# 일화 수는 조각 없을 때의 2.18배다(4개면 2.29배)
+MAX_TURN_PARTS = 2
+PART_USER_CHARS = 200  # 조각 일화에 붙이는 발화 앞부분. 조각만으로도 무슨 질문의 답인지 보이게
+# session_end, auto_summary 는 더 쓰지 않는다(옛 세션 요약). 운영 DB 에 아직 추출하지 않은 행이 남아 있다
+CONSOLIDATABLE_SOURCES = frozenset({TURN_SOURCE, "session_end", "auto_summary", "manual_compact"})
+
+
+@dataclass(frozen=True)
+class WriteRule:
+    kind: MemoryKind
+    author: str | None  # None 이면 쓰는 에이전트의 id
+    importance: float | None = None  # None 이면 MemoryItem 기본값
+
+
+# 쓰기 경로별 규칙. 계획서의 표가 정본이고 이 상수가 그 투영이다.
+WRITE_RULES: dict[str, WriteRule] = {
+    # /remember. 사용자가 일부러 남기라고 한 것은 그 자체로 임팩트 신호다(섬광 기억 자리 대상)
+    "explicit": WriteRule(MemoryKind.SEMANTIC, "user", importance=0.8),
+    "usermodel": WriteRule(MemoryKind.SEMANTIC, None),  # 사용자 모델 증류
+    "extracted": WriteRule(MemoryKind.SEMANTIC, None),  # 일화에서 추출한 사실
+    "manual_compact": WriteRule(MemoryKind.EPISODIC, None),  # /compact
+    TURN_SOURCE: WriteRule(MemoryKind.EPISODIC, None),  # 턴 기록(STM 3턴 밖은 여기서 회상)
+    TURN_PART_SOURCE: WriteRule(MemoryKind.EPISODIC, None),  # 긴 답의 나머지 조각
+    "thought": WriteRule(MemoryKind.EPISODIC, None),  # 사고 로그
+    "journal": WriteRule(MemoryKind.EPISODIC, None),  # 자기 성찰 저널
+    "delegation": WriteRule(MemoryKind.EPISODIC, "orchestrator"),  # 위임 기록
+    # 블랙보드 결과. 에이전트가 한 일이라 사용자 프로필(의미 기억)이 아니다. 승격한 에이전트의 EDM 이다
+    "promoted": WriteRule(MemoryKind.EPISODIC, None),
+    # 사용자가 알려 준 작업 방식. 그 에이전트의 PDM 이다(같은 말도 에이전트마다 하는 일이 다르다)
+    TASK_PATTERN_SOURCE: WriteRule(MemoryKind.PROCEDURAL, "user"),
+}
+# 한 턴에 넣는 작업 패턴 수와, 고를 때 보는 후보 수
+PATTERN_INJECT_LIMIT = 2
+PATTERN_SCAN_LIMIT = 100
+# 일반 회상 블록은 일화와 사실만. 작업 패턴은 따로 고른다
+RECALL_KINDS = (MemoryKind.EPISODIC, MemoryKind.SEMANTIC)
+# 사고 로그는 매 턴 사용자 말을 다시 적어 같은 낱말로 턴 일화보다 많이, 더 최근에 걸린다. 회상 자리를 빼앗지 않게 뺀다
+RECALL_FILTER = ItemFilter(exclude_sources=frozenset({"thought"}))
+# 대상 뽑기는 1차 회상과 함께 돌고 이 시간을 넘기면 버린다. 첫 글자 지연에 더해지는 상한이다
+COVERAGE_TIMEOUT_SEC = 1.5
+# 타임라인을 지을 때 대상 하나로 받는 일화 후보 수. 이름이 글자로 나오는 것만 남긴다
+TIMELINE_CANDIDATES = 120
+# 빠진 대상 하나로 다시 찾을 때 받는 후보 수. 창 안의 턴과 이미 보인 항목을 거르고 첫 하나만 쓴다
+COVERAGE_CANDIDATES = 3
+TURN_STEPS = "steps"  # 턴 일화 metadata: 성공한 도구 호출 [{name, args}]. 절차 정제의 재료
+MAX_TURN_STEPS = 10
+MAX_STEP_ARG_CHARS = 200  # 파일 본문 같은 긴 인자는 잘라도 절차는 읽힌다
+# 절차 정제가 훑는 최근 일화 수. 사고 로그와 저널은 따라 할 작업이 아니라 뺀다
+REFINE_SCAN_LIMIT = 500
+REFINE_FILTER = ItemFilter(exclude_sources=frozenset({"thought", "journal"}))
+# consolidate 끝에 부르는 절차 정제. 새로 쓴 절차 초안 이름을 돌려준다(core/procedures 가 꽂는다)
+Refiner = Callable[[MemoryScope], Awaitable[list[str]]]
+# 떠올린 항목의 낱말이 답에 이만큼 나오면 답에 쓰였다고 보고 되뇌기로 센다
+USED_OVERLAP = 0.5
+STM_TURNS = 3  # 모델에 넣는 최근 턴 수(config.MemoryConfig.stm_turns 기본값)
+# 규칙에 없는 경로는 에이전트가 겪은 일로 둔다. 의미 기억은 사용자에 대한 사실(사용자 프로필)이라 위 규칙으로만 쓴다
+_DEFAULT_RULE = WriteRule(MemoryKind.EPISODIC, None)
+
+
+class MemoryService:
+    def __init__(
+        self,
+        store: ItemStore,
+        working: WorkingStore | None = None,
+        *,
+        extractor: FactExtractor | None = None,
+        procedures: ProceduralSource | None = None,
+        inject_limit: int = 3,
+        fixed_facts: int = 3,
+        importance_threshold: float = 0.5,
+        scoring: ScoringParams = DEFAULT_PARAMS,
+        interference_threshold: float = 0.6,
+        embedder: Embedder | None = None,
+        min_similarity: float = 0.3,
+        policies: Mapping[str, MemoryPolicy] | None = None,
+        stm_turns: int = STM_TURNS,
+        stm_max_age_hours: float = 24.0,
+        answer_parts: int = MAX_TURN_PARTS,
+        source_recall: bool = True,
+        coverage: EntityExtractor | None = None,
+        coverage_timeout: float = COVERAGE_TIMEOUT_SEC,
+        timeline: bool = False,
+    ) -> None:
+        self._store = store
+        # 회상이 질문의 대상을 다 덮지 못하면 빠진 대상으로 다시 찾는다(NVIDIA auto-ontology 의 entity coverage)
+        self._coverage = coverage
+        self._coverage_timeout = coverage_timeout
+        # 세기, 순서, 기간을 묻는 질문이면 대상별 일화를 시간순으로 붙인다. 대상은 coverage 가 뽑는다
+        self._timeline = timeline
+        self._working: WorkingStore = working or InMemoryWorkingStore()
+        self._extractor = extractor
+        self._procedures = procedures
+        self._inject_limit = inject_limit
+        self._fixed_facts = fixed_facts
+        self._importance_threshold = importance_threshold
+        self._scoring = scoring
+        self._interference_threshold = interference_threshold
+        self._embedder = embedder
+        self._min_similarity = min_similarity
+        # 에이전트 id 별 읽기 정책(team/<id>.yaml). 없는 에이전트는 자기 것만 읽는다
+        self._policies: Mapping[str, MemoryPolicy] = policies or {}
+        # STM 은 최근 이 턴 수다. 그 밖의 대화는 턴마다 쓴 EDM 에서 회상한다
+        self._stm_turns = max(1, stm_turns)
+        # 이보다 오래된 턴은 턴 수 안이어도 창에서 뺀다(마지막 턴은 둔다). 0 이면 나이를 보지 않는다
+        self._stm_max_age_ms = int(max(0.0, stm_max_age_hours) * 3600 * 1000)
+        self._answer_parts = max(0, answer_parts)
+        # 회상 블록은 추출 사실의 출처 턴까지 후보에 넣고 질의 관련도 하나로 다시 매긴다. LongMemEval-s 60문항,
+        # 실서비스 블록(핵심 사실 3건 + 회상 3건) 조건에서 정답률 0.28 이 0.50 이 됐다(잃은 문항 0, 문서 실험 절)
+        # ponytail: 이 경로는 최근성, 중요도, 섬광 기억 자리를 쓰지 않는다, 최근 일화를 묻는 회상이 평가에서 밀리면
+        # 관련도 동점 구간에만 합성 점수를 쓰도록 바꾼다
+        self._source_recall = source_recall
+        # 이번 턴의 (턴 번호, 사용자 발화). reinforce 가 답과 묶어 EDM 에 쓴다
+        self._pending_turn: dict[MemoryScope, tuple[int, str]] = {}
+        self._refiner: Refiner | None = None
+        # 이번 턴에 떠올린 항목. 답이 나오면 reinforce 가 꺼내 쓰였는지 본다. 턴 하나 동안만 산다
+        self._pending_recall: dict[MemoryScope, list[MemoryItem]] = {}
+
+    @property
+    def store(self) -> ItemStore:
+        return self._store
+
+    @property
+    def working(self) -> WorkingStore:
+        return self._working
+
+    @property
+    def fixed_facts_limit(self) -> int:
+        return self._fixed_facts
+
+    @property
+    def answer_parts(self) -> int:
+        """긴 답을 나눠 남기는 조각 일화의 최대 수. 0 이면 나누지 않는다."""
+        return self._answer_parts
+
+    def attach_refiner(self, refiner: Refiner) -> None:
+        """절차 저장소와 증류기는 메모리보다 늦게 만들어져 생성자로 받지 못한다. 다시 꽂으면 바꾼다."""
+        self._refiner = refiner
+
+    # ── 턴 전 변환 ──────────────────────────────────────────────────────────
+
+    async def observe(self, messages: list[Message], context: dict[str, Any]) -> list[Message]:
+        """세션 이력 전체를 받아 LLM 에 넣을 컨텍스트를 만든다.
+
+        최근 stm_turns 턴만 두고 고정 블록(사용자 프로필), 회상 블록, 절차, 작업 패턴을 앞에 붙인다.
+        이번 턴은 reinforce 가 EDM 에 쓴다.
+        """
+        scope = scope_from_context(context)
+        starts = turn_starts(messages)
+        if starts:
+            self._pending_turn[scope] = (len(starts), _text_of(messages[starts[-1]]))
+        window = last_turns(messages, self._stm_turns, self._stm_max_age_ms)
+        # 창에 아직 있는 턴은 회상 블록에 다시 넣지 않는다. 나이로 빠진 턴은 회상으로 돌아올 수 있다
+        first_in_window = max(1, len(starts) - len(turn_starts(window)) + 1)
+        return await self._with_blocks(messages, window, scope, first_in_window)
+
+    async def _with_blocks(
+        self, messages: list[Message], out: list[Message], scope: MemoryScope, first_in_window: int
+    ) -> list[Message]:
+        """고정 블록, 회상 블록, 절차, 작업 패턴, 작업 공유 메모리를 창 앞에 붙이고 떠올린 항목을 기록한다."""
+        query = _last_user_text(messages)
+        # 지칭("그거 해줘")은 발화만으로 단서가 없다. 회상만 직전 대화를 덧붙인 질의로 찾는다
+        cue = retrieval_query(messages)
+        fixed = await self.fixed_facts(scope)
+        fixed_ids = {i.id for i in fixed}
+        cued: list[MemoryItem] = []
+        recalled: list[MemoryItem] = []
+        patterns: list[TaskPattern] = []
+        timelines: list[str] = []
+        if cue:
+            # 대상 뽑기(LLM)를 1차 회상과 함께 돌려 지연을 겹친다
+            names = asyncio.create_task(self.entities(cue))
+            # 고정 블록에 이미 있는 항목도 질의에 걸리면 떠올린 것이다. 회상 블록에는 겹치지 않게 뺀다
+            # 창 안의 턴은 아래에서 빼므로 그만큼 더 받아야 회상 자리가 줄지 않는다
+            extra = len(fixed) + self._stm_turns
+            find = self.recall_with_sources if self._source_recall else self.recall
+            cued = await find(cue, scope, kinds=RECALL_KINDS, limit=self._inject_limit + extra, where=RECALL_FILTER)
+            recalled = [
+                i for i in cued if i.id not in fixed_ids and not _in_window(i, scope, first_in_window)
+            ][: self._inject_limit]
+            targets = await names
+            recalled = await self.cover(
+                targets, recalled, scope, self._inject_limit, exclude=fixed_ids,
+                keep=lambda i: not _in_window(i, scope, first_in_window),
+            )
+            if self._timeline and is_aggregate(query):
+                timelines = await self.timelines(targets, scope)
+            cued = [i for i in cued if i.id in fixed_ids] + recalled
+            patterns = best_matches(await self.task_patterns(scope), cue, PATTERN_INJECT_LIMIT)
+        procedures = self.procedures(query, scope.agent_id) if query else []
+
+        blocks: list[Message] = []
+        if fixed:
+            blocks.append(_block(FACTS_HEADER, fixed))
+        if recalled:
+            blocks.append(_block(LTM_HEADER, recalled))
+        for text in timelines:
+            blocks.append(UserMessage(content=text, timestamp=int(time.time() * 1000)))
+        if procedures:
+            blocks.append(_procedures_block(procedures))
+        if patterns:
+            blocks.append(UserMessage(content=render_block(patterns), timestamp=int(time.time() * 1000)))
+        if query and teaches(query):
+            blocks.append(UserMessage(content=f"{SAVE_HINT_HEADER} {SAVE_HINT}", timestamp=int(time.time() * 1000)))
+        shared_task = current_task.get()
+        if shared_task is not None:
+            notes = await self.task_notes(shared_task, scope)
+            if notes:
+                blocks.append(UserMessage(content=f"{TASK_HEADER}\n" + "\n".join(f"- {n}" for n in notes),
+                                          timestamp=int(time.time() * 1000)))
+        # 질의에 걸린 것만 후보로 둔다. 고정 블록에 들어갔다는 이유만으로 세면 한 번 고정된 사실이
+        # 매 턴 스스로 강해지고 최근해져서 영영 자리를 내주지 않는다. 되뇌기는 답에 쓰인 것만 reinforce 가 센다
+        self._pending_recall[scope] = cued
+        if cued:
+            await self._store.touch([i.id for i in cued], datetime.now())
+        return blocks + out
+
+    async def reinforce(
+        self,
+        answer: str,
+        context: dict[str, Any],
+        *,
+        tools: Sequence[str] = (),
+        failed: bool = False,
+        steps: Sequence[tuple[str, dict[str, Any]]] = (),
+        overflow: bool = False,
+    ) -> list[str]:
+        """이번 턴에 떠올린 항목 중 답에 쓰인 것만 되뇌기로 센다. 두 번 불러도 한 번만 센다.
+
+        이번 턴을 EDM 에 쓴다. tools 는 이번 턴에 부른 도구 순서, failed 는 도구나 모델 실패,
+        steps 는 성공한 도구 호출(이름, 인자)이다.
+
+        # ponytail: 항목 낱말이 답에 절반 넘게 나와야 쓰였다고 본다(긴 일화는 덜 잡힌다), 누락이 보이면 임베딩 유사도로
+        """
+        scope = scope_from_context(context)
+        turn = self._pending_turn.pop(scope, None)
+        cued = self._pending_recall.pop(scope, [])
+        if turn is not None:
+            turn_id = await self.record_turn(
+                turn[0], turn[1], answer, scope, task_type=tools[0] if tools else CHAT_TASK, failed=failed,
+                tools=tools, steps=steps, overflow=overflow,
+            )
+            prior = [item for item in cued if item.kind is MemoryKind.SEMANTIC]
+            if prior and is_correction(turn[1]):
+                await self.fold_correction(turn_id, prior, scope)
+        used = [item.id for item in cued if answer and relevance(item.content, answer) >= USED_OVERLAP]
+        if used:
+            state = await self._working.load(scope)
+            for item_id in used:
+                state.rehearse(item_id)
+            await self._working.save(state)
+        return used
+
+    async def record_turn(
+        self,
+        index: int,
+        user: str,
+        answer: str,
+        scope: MemoryScope,
+        *,
+        task_type: str = CHAT_TASK,
+        failed: bool = False,
+        tools: Sequence[str] = (),
+        steps: Sequence[tuple[str, dict[str, Any]]] = (),
+        overflow: bool = False,
+    ) -> str:
+        """턴 하나를 EDM 일화로 쓴다. 같은 세션의 같은 턴 번호면 같은 항목을 덮어 두 번 불러도 하나다.
+
+        답이 TURN_CHARS 보다 길면 나머지를 조각 일화로 남긴다. 다시 쓸 때 조각이 줄면 남는 조각을 지운다.
+
+        # ponytail: 이력이 줄어 턴 번호를 1부터 다시 세면 옛 턴 일화를 덮는다, 세션 초기화가 잦아지면 세대 번호를 키에
+        """
+        said = user[:TURN_CHARS]
+        content, *parts = turn_contents(user, answer, self._answer_parts)
+        main_id = turn_item_id(scope, index)
+        previous = await self._store.get(main_id) if self._answer_parts else None
+        stored = await self.remember(
+            content, source=TURN_SOURCE, scope=scope,
+            metadata={TURN_INDEX: index, TASK_TYPE: task_type, OUTCOME: "failure" if failed else "success",
+                      "tools": list(dict.fromkeys(tools)), TURN_USER_CHARS: len(said),
+                      TURN_STEPS: [{"name": n, "args": _short_args(a)} for n, a in steps[:MAX_TURN_STEPS]],
+                      TURN_PARTS: len(parts),
+                      # 루프가 max_turns 를 넘겨 이어갔다. 단계가 너무 컸다는 근거로 실패 반성이 읽는다
+                      **({"overflow": True} if overflow else {})},
+            item_id=main_id,
+        )
+        for number, part in enumerate(parts, start=1):
+            await self.remember(
+                part, source=TURN_PART_SOURCE, scope=scope, metadata={TURN_INDEX: index, TURN_PART: number},
+                item_id=turn_item_id(scope, index, number),
+            )
+        if previous is not None:
+            for number in range(len(parts) + 1, int(previous.metadata.get(TURN_PARTS, 0)) + 1):
+                await self._store.delete(turn_item_id(scope, index, number))
+        return stored
+
+    async def mark_turn_failed(self, scope: MemoryScope, index: int, correction: str) -> bool:
+        """사용자가 다음 말로 바로잡은 턴 일화를 실패로 적고 그 말을 남긴다. 없는 턴이면 False. 두 번 불러도 같다."""
+        item = await self._store.get(turn_item_id(scope, index))
+        if item is None or item.source != TURN_SOURCE:
+            return False
+        metadata = {**item.metadata, OUTCOME: "failure", CORRECTION: correction.strip()[:TURN_CHARS]}
+        await self._store.store(replace(item, metadata=metadata))
+        return True
+
+    async def fold_correction(self, episode_id: str, prior: Sequence[MemoryItem], scope: MemoryScope) -> int:
+        """정정한 턴에서 바로 사실을 뽑아 같은 주제의 옛 사실을 대체한다. 돌려주는 값은 새로 쓴 사실 수.
+
+        공고화(조용한 틱)까지 기다리면 그사이 틀린 사실이 계속 회상된다. 추출기에 정정 전 사실을 함께 보여
+        같은 주제 이름을 쓰게 한다(remember 는 같은 주제면 대체한다).
+        뽑은 턴은 추출 완료로 표시해 공고화가 다시 뽑지 않는다.
+        """
+        episode = await self._store.get(episode_id)
+        if self._extractor is None or episode is None:
+            return 0
+        before = "\n".join(f"- {item.content}" for item in prior)
+        facts = await self._extractor(f"[정정 전 사실]\n{before}\n\n{_extraction_text(episode)}")
+        written = await self._write_facts(facts, [episode], scope)
+        episode.metadata[CONSOLIDATED] = True
+        await self._store.store(episode)
+        logger.info("[Memory] correction folded", prior=len(prior), facts=written)
+        return written
+
+    async def fixed_facts(self, scope: MemoryScope) -> list[MemoryItem]:
+        """질의와 무관하게 항상 넣는 의미 사실. 중요도와 최근성으로 고른다."""
+        if self._fixed_facts <= 0:
+            return []
+        resolved = scope
+        pool = self._fixed_facts * 4
+        # 최신순으로만 고르면 의미 사실이 pool 개를 넘는 순간 오래된 핵심 사실(이름, 알레르기)이 후보에서 빠진다
+        readable = self.readable(resolved)
+        recent = await self._store.recent(resolved, kinds=[MemoryKind.SEMANTIC], limit=pool, readable=readable)
+        important = await self._store.important(resolved, kinds=[MemoryKind.SEMANTIC], limit=pool, readable=readable)
+        candidates = list({i.id: i for i in recent + important}.values())
+        # 고정 블록은 감쇠 없는 원값으로 고른다. 오래됐다고 핵심 사실이 밀리면 안 된다
+        no_decay = replace(self._scoring, importance_half_life_hours=0.0)
+        return rank(candidates, "", resolved, self._fixed_facts, params=no_decay)
+
+    # ── 작업 패턴(사용자가 알려 준 방식, 에이전트 전용) ─────────────────────────
+
+    async def remember_pattern(self, pattern: TaskPattern, scope: MemoryScope) -> str:
+        """같은 (사용자, 에이전트, 이름)이면 같은 항목을 덮는다. 다시 불러도 하나만 남는다."""
+        resolved = scope.with_session(None)
+        return await self.remember(
+            pattern.content(), source=TASK_PATTERN_SOURCE, scope=resolved, metadata=pattern.metadata(),
+            importance=0.8, item_id=pattern_id(resolved, pattern.name),
+        )
+
+    async def task_patterns(self, scope: MemoryScope) -> list[TaskPattern]:
+        """이 에이전트가 받은 작업 패턴과, 정책의 pdm 이 허락한 에이전트의 패턴."""
+        items = await self._store.recent(
+            scope, kinds=[MemoryKind.PROCEDURAL], limit=PATTERN_SCAN_LIMIT, readable=self.readable(scope)
+        )
+        return [p for p in (from_item(i) for i in items) if p is not None]
+
+    async def forget_pattern(self, name: str, scope: MemoryScope) -> bool:
+        resolved = scope.with_session(None)
+        item_id = pattern_id(resolved, name)
+        if await self._store.get(item_id) is None:
+            return False
+        await self._store.delete(item_id)
+        return True
+
+    def procedures(self, query: str, agent: str | None = None) -> list[Procedure]:
+        """agent 를 주면 그 에이전트에게 보이는 절차만."""
+        return self._procedures.match(query, agent) if self._procedures is not None else []
+
+    # ── 작업 공유 메모리(오케스트레이션) ────────────────────────────────────
+
+    async def share(self, root_task_id: str, text: str, author: str, scope: MemoryScope) -> None:
+        """작업에 참여하는 에이전트 전원이 볼 메모를 남긴다. 블랙보드와 레벨 간 결과 전달이 이 통로를 쓴다."""
+        await self.add_note(f"[{author}] {text}", scope=task_scope(scope.user_id, root_task_id))
+
+    async def task_notes(self, root_task_id: str, scope: MemoryScope) -> list[str]:
+        state = await self._working.load(task_scope(scope.user_id, root_task_id))
+        return list(state.notes)
+
+    async def clear_task(self, root_task_id: str, scope: MemoryScope) -> None:
+        await self._working.clear(task_scope(scope.user_id, root_task_id))
+
+    async def legacy_stm_rows(self) -> int | None:
+        """옛 STM 테이블 행 수. 저장소가 모르면(in-memory) None."""
+        return await self._working.legacy_stm_rows()
+
+    async def drop_legacy_stm(self) -> None:
+        await self._working.drop_legacy_stm()
+
+    async def add_note(self, text: str, scope: MemoryScope) -> None:
+        resolved = scope
+        state = await self._working.load(resolved)
+        state.add_note(text)
+        await self._working.save(state)
+
+    async def working_state(self, scope: MemoryScope) -> WorkingState:
+        return await self._working.load(scope)
+
+    async def clear_working(self, scope: MemoryScope) -> None:
+        await self._working.clear(scope)
+
+    async def forget_sessions(self, prefixes: tuple[str, ...], dry_run: bool = False) -> tuple[int, int]:
+        """세션 id 접두어로 고른 세션의 장기 기억 항목과 작업 기억을 지운다. (항목 수, 작업 기억 수)."""
+        return (await self._store.delete_sessions(prefixes, dry_run),
+                await self._working.delete_sessions(prefixes, dry_run))
+
+    async def forget_session(self, session_id: str) -> tuple[int, int]:
+        """그 세션의 턴 일화, 사고 로그 같은 장기 기억 항목과 작업 기억을 지운다. (항목 수, 작업 기억 수).
+
+        사용자 프로필 사실과 절차는 세션에 묶이지 않아 남는다. 두 번 불러도 같은 상태다.
+        """
+        return await self._store.delete_session(session_id), await self._working.delete_session(session_id)
+
+    # ── 장기 기억 ───────────────────────────────────────────────────────────
+
+    async def remember(
+        self,
+        content: str,
+        source: str,
+        scope: MemoryScope,
+        *,
+        kind: MemoryKind | None = None,
+        author: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        importance: float | None = None,
+        item_id: str | None = None,
+        created_at: datetime | None = None,
+        referent: str | None = None,
+    ) -> str:
+        """source 의 쓰기 규칙으로 항목을 만들어 저장한다. 키워드 인자는 규칙을 덮어쓴다.
+
+        의미 항목은 같은 주제의 옛 사실을 대체하고, 일화 항목은 사건 시각을 받는다.
+        referent 는 content 의 상대 지칭이 가리키는 대화다. 검색과 임베딩, 회상 표시에 같이 쓴다.
+        """
+        rule = WRITE_RULES.get(source, _DEFAULT_RULE)
+        resolved = scope
+        item = MemoryItem(
+            content=content,
+            kind=kind or rule.kind,
+            scope=resolved,
+            author=author or rule.author or resolved.agent_id,
+            source=source,
+            tags=list(tags or []),
+            metadata=dict(metadata or {}),
+        )
+        if importance is not None:
+            item.importance = importance
+        elif rule.importance is not None:
+            item.importance = rule.importance
+        if item_id is not None:
+            item.id = item_id
+        if referent:
+            item.metadata[REFERENT] = referent
+        if created_at is not None:
+            item.created_at = created_at
+        if item.kind is MemoryKind.SEMANTIC:
+            prepare_fact(item)
+        elif item.kind is MemoryKind.EPISODIC:
+            prepare_episode(item)
+        await self._embed(item)
+        stored = await self._store.store(item)
+        if item.kind is MemoryKind.SEMANTIC:
+            await supersede_conflicts(self._store, item)
+        return stored
+
+    async def recall(
+        self,
+        query: str,
+        scope: MemoryScope,
+        kinds: Sequence[MemoryKind] | None = None,
+        limit: int = 10,
+        exclude: set[str] | None = None,
+        where: ItemFilter | None = None,
+    ) -> list[MemoryItem]:
+        """키워드와 의미 유사도로 후보를 넓게 모은 뒤 합성 점수로 상위 limit 개."""
+        resolved = scope
+        query_embedding = await self._embed_query(query)
+        candidates = await self._store.search(
+            query, resolved, kinds, limit * 4, query_embedding=query_embedding, min_similarity=self._min_similarity,
+            readable=self.readable(resolved), where=where,
+        )
+        if exclude:
+            candidates = [c for c in candidates if c.id not in exclude]
+        return rank(candidates, query, resolved, limit, params=self._scoring, query_embedding=query_embedding)
+
+    async def entities(self, query: str) -> list[str]:
+        """질문에서 기억으로 찾을 대상. 추출기가 없거나, 상한 시간을 넘기거나, 실패하면 빈 목록."""
+        if self._coverage is None or not query.strip():
+            return []
+        try:
+            return await asyncio.wait_for(self._coverage(query), self._coverage_timeout)
+        except Exception as exc:  # 대상 뽑기는 덧붙이는 단계다. 실패하면 1차 회상만 쓴다
+            logger.info("[Memory] coverage extract skipped", reason=type(exc).__name__)
+            return []
+
+    async def cover(
+        self,
+        names: Sequence[str],
+        items: Sequence[MemoryItem],
+        scope: MemoryScope,
+        limit: int,
+        *,
+        exclude: set[str] | None = None,
+        keep: Callable[[MemoryItem], bool] | None = None,
+    ) -> list[MemoryItem]:
+        """items 가 덮지 못한 대상마다 그 이름으로 하나씩 더 찾아 limit 개 안에 섞는다. 덮었으면 items 그대로."""
+        if not names:
+            return list(items)
+        missing = uncovered(names, items, await self._embed_names(names))
+        if not missing:
+            return list(items)
+        taken = {i.id for i in items} | (exclude or set())
+        extra: list[MemoryItem] = []
+        for name in missing:
+            found = await self.recall(
+                name, scope, kinds=RECALL_KINDS, limit=COVERAGE_CANDIDATES, exclude=taken, where=RECALL_FILTER
+            )
+            pick = next((i for i in found if keep is None or keep(i)), None)
+            if pick is not None:
+                taken.add(pick.id)
+                extra.append(pick)
+        logger.info("[Memory] coverage", entities=len(names), uncovered=len(missing), added=len(extra))
+        return merge_coverage(items, extra, limit)
+
+    async def timelines(self, names: Sequence[str], scope: MemoryScope) -> list[str]:
+        """대상마다 그 이름이 글자로 나오는 일화를 시간순으로 늘어놓은 블록. 나온 일화가 없는 대상은 뺀다."""
+        out: list[str] = []
+        for name in names:
+            found = await self.recall(
+                name, scope, kinds=[MemoryKind.EPISODIC], limit=TIMELINE_CANDIDATES, where=RECALL_FILTER
+            )
+            text = render_timeline(name, mentions(name, found))
+            if text:
+                out.append(text)
+        logger.info("[Memory] timeline", entities=len(names), blocks=len(out))
+        return out
+
+    async def _embed_names(self, names: Sequence[str]) -> list[list[float] | None]:
+        if self._embedder is None:
+            return []
+        try:
+            return list(await self._embedder.embed(list(names)))
+        except Exception:  # 벡터가 없으면 글자 포함만으로 가린다
+            return []
+
+    async def recall_episodes(
+        self,
+        query: str,
+        scope: MemoryScope,
+        *,
+        task_type: str | None = None,
+        outcome: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 5,
+    ) -> list[MemoryItem]:
+        """조건에 맞는 일화만 골라 회상한다(cherry-pick). 조건에 맞는 것이 없으면 비운다."""
+        where = replace(RECALL_FILTER, task_type=task_type, outcome=outcome, since=since, until=until)
+        return await self.recall(query, scope, kinds=[MemoryKind.EPISODIC], limit=limit, where=where)
+
+    async def refinement_candidates(self, scope: MemoryScope) -> list[Candidate]:
+        """이 에이전트의 같은 작업 종류 성공이 쌓여 절차로 정제할 만한 것. 자기 일화만 본다."""
+        resolved = scope.with_session(None)
+        items = await self._store.recent(
+            resolved, kinds=[MemoryKind.EPISODIC], limit=REFINE_SCAN_LIMIT,
+            readable=Readable.own(resolved.agent_id), where=REFINE_FILTER,
+        )
+        return candidates(items, resolved)
+
+    async def recall_with_sources(
+        self,
+        query: str,
+        scope: MemoryScope,
+        kinds: Sequence[MemoryKind] | None = None,
+        limit: int = 10,
+        where: ItemFilter | None = None,
+    ) -> list[MemoryItem]:
+        """후보에 든 추출 사실의 출처 턴을 후보에 더하고, 사실과 턴을 질의 관련도 하나로 다시 매긴다.
+
+        추출은 원문에서 벗어난다(줄이기, 바꿔 말하기, 옮기기). 원래 턴으로 돌아갈 길을 회상 안에 남긴다
+        (Memory Tax, He et al. 2026 의 source 회상과 공동 재순위). 지워진 출처는 건너뛴다.
+        """
+        query_embedding = await self._embed_query(query)
+        candidates = await self._store.search(
+            query, scope, kinds, limit * 4, query_embedding=query_embedding, min_similarity=self._min_similarity,
+            readable=self.readable(scope), where=where,
+        )
+        seen = {c.id for c in candidates}
+        for item in list(candidates):
+            source_id = item.metadata.get(SOURCE_EPISODE)
+            if item.kind is not MemoryKind.SEMANTIC or not source_id or source_id in seen:
+                continue
+            episode = await self._store.get(str(source_id))
+            if episode is not None and (where is None or where.allows(episode)):
+                candidates.append(episode)
+                seen.add(episode.id)
+        return joint_rank(candidates, query, limit, query_embedding)
+
+    async def source_excerpts(self, items: Sequence[MemoryItem]) -> dict[str, str]:
+        """추출한 사실마다 출처 일화에서 사실과 가장 겹치는 부분(최대 300자). 출처가 지워졌거나 함께 떠올랐으면 뺀다.
+
+        처음 시도한 출처 발췌 방식이다. 발췌가 같은 노출 예산을 먹어 사실과 턴을 밀어내 실서비스에서는 쓰지 않고,
+        평가의 turns+excerpt 비교군만 쓴다.
+        """
+        shown = {i.id for i in items}
+        out: dict[str, str] = {}
+        for item in items:
+            source_id = item.metadata.get(SOURCE_EPISODE)
+            if item.kind is not MemoryKind.SEMANTIC or not source_id or source_id in shown:
+                continue
+            episode = await self._store.get(str(source_id))
+            if episode is not None:
+                out[item.id] = source_excerpt(item.content, source_text(episode))
+        return out
+
+    async def recall_messages(self, query: str, context: dict[str, Any], limit: int = 10) -> list[Message]:
+        """inner thought 의 회상 콜백(RecallFn) 모양. 범위는 턴 컨텍스트에서 정하고 항목은 사용자 메시지로 감싼다."""
+        items = await self.recall(query, scope_from_context(context), limit=limit)
+        return [UserMessage(content=i.content, timestamp=int(i.created_at.timestamp() * 1000)) for i in items]
+
+    async def _embed(self, item: MemoryItem) -> None:
+        """임베더가 있으면 항목에 벡터를 붙인다. 임베딩 실패는 저장을 막지 않는다(키워드로는 여전히 찾힌다)."""
+        if self._embedder is None:
+            return
+        try:
+            item.embedding = (await self._embedder.embed([item.search_text]))[0]
+            item.embedding_model = self._embedder.model
+        except Exception:
+            item.embedding, item.embedding_model = None, None
+
+    async def _embed_query(self, query: str) -> list[float] | None:
+        if self._embedder is None or not query.strip():
+            return None
+        try:
+            return (await self._embedder.embed([query]))[0]
+        except Exception:
+            return None
+
+    async def reembed(self, scope: MemoryScope, limit: int = 500) -> int:
+        """벡터가 없거나 다른 모델로 만든 항목을 현재 임베더로 다시 임베딩한다. 돌려주는 값은 갱신 수.
+
+        두 번 돌려도 같은 상태: 현재 모델로 된 항목은 건너뛴다.
+        """
+        if self._embedder is None:
+            return 0
+        resolved = scope
+        items = await self._store.recent(resolved, limit=limit)
+        stale = [i for i in items if i.embedding is None or i.embedding_model != self._embedder.model]
+        if not stale:
+            return 0
+        vectors = await self._embedder.embed([i.search_text for i in stale])
+        for item, vector in zip(stale, vectors, strict=True):
+            item.embedding, item.embedding_model = vector, self._embedder.model
+            await self._store.store(item)
+        return len(stale)
+
+    async def recent(
+        self,
+        scope: MemoryScope,
+        kinds: Sequence[MemoryKind] | None = None,
+        limit: int = 10,
+    ) -> list[MemoryItem]:
+        return await self._store.recent(scope, kinds, limit, readable=self.readable(scope))
+
+    def readable(self, scope: MemoryScope) -> Readable:
+        """이 범위의 에이전트가 층별로 읽을 수 있는 소유 에이전트. 저장소 조회는 전부 이 값으로 거른다."""
+        return resolve(self._policies, scope.agent_id)
+
+    async def get(self, item_id: str) -> MemoryItem | None:
+        return await self._store.get(item_id)
+
+    async def supersede(self, old_id: str, new_id: str) -> None:
+        await self._store.supersede(old_id, new_id)
+
+    async def forget(self, item_id: str) -> None:
+        await self._store.delete(item_id)
+
+    async def clear(self, scope: MemoryScope | None = None) -> None:
+        await self._store.clear(scope)
+
+    # ── 공고화 ──────────────────────────────────────────────────────────────
+
+    async def _write_facts(self, facts: Sequence[Fact], group: Sequence[MemoryItem], scope: MemoryScope) -> int:
+        """중요도 임계를 넘은 사실을 사용자 프로필로 쓰고 출처 턴을 단다. 같은 주제의 옛 사실은 remember 가 대체한다."""
+        written = 0
+        for fact in facts:
+            if fact.importance < self._importance_threshold:
+                continue
+            # 출처는 사실 낱말이 가장 많이 나온 턴이다. 회상 때 그 턴의 해당 부분을 사실 아래 붙인다
+            source = pick_source(fact.content, list(group), source_text)
+            if source is None and len(group) > 1:
+                vector = await self._embed_query(fact.content)
+                source = nearest_episode(vector, list(group)) if vector else None
+            source = source or group[0]
+            await self.remember(
+                fact.content,
+                source="extracted",
+                scope=scope.with_session(None),
+                importance=fact.importance,
+                metadata={SOURCE_EPISODE: source.id},
+            )
+            written += 1
+        return written
+
+    async def consolidate(self, scope: MemoryScope) -> int:
+        """세션 종료와 사용자가 조용한 daemon 틱에 부른다. 돌려주는 값은 새로 쓴 의미 사실 수.
+
+        1. 아직 추출하지 않은 이 소유자의 일화(턴은 세션별 묶음, 요약은 하나씩)에서 사실을 뽑아 사용자 프로필로 쓴다.
+           importance 가 임계 미만이면 버린다. 같은 주제의 옛 사실은 remember 가 대체한다.
+        2. 주제가 달라도 내용이 비슷한 의미 항목 쌍을 간섭 후보로 표시한다(대체는 하지 않는다).
+        3. 작업 기억의 되뇌기 횟수를 항목의 rehearsal_count 로 옮기고 비운다.
+        두 번 불러도 같은 상태: 추출한 일화와 간섭 쌍은 metadata 로 표시하고 되뇌기는 비운다.
+        """
+        resolved = scope
+        written = 0
+        if self._extractor is not None:
+            episodes = await self._store.recent(resolved, kinds=[MemoryKind.EPISODIC], limit=50)
+            pending = [
+                e for e in episodes
+                if e.source in CONSOLIDATABLE_SOURCES
+                and not e.metadata.get(CONSOLIDATED)
+                and e.scope.user_id == resolved.user_id
+                and e.scope.agent_id == resolved.agent_id
+            ]
+            for group in _extraction_groups(pending):
+                facts = await self._extractor("\n\n".join(_extraction_text(e) for e in group))
+                written += await self._write_facts(facts, group, resolved)
+                # 추출 중에 죽으면 표시하지 않은 묶음은 다음 호출에서 다시 뽑는다. 같은 주제 사실은 remember 가 대체한다
+                for episode in group:
+                    episode.metadata[CONSOLIDATED] = True
+                    await self._store.store(episode)
+
+        await mark_interference(self._store, resolved.with_session(None), self._interference_threshold)
+        if self._refiner is not None:
+            await self._refiner(resolved)
+
+        state = await self._working.load(resolved)
+        if state.rehearsal:
+            for item_id, count in state.rehearsal.items():
+                item = await self._store.get(item_id)
+                if item is not None:
+                    item.rehearsal_count += count
+                    await self._store.store(item)
+            state.rehearsal = {}
+            await self._working.save(state)
+        return written
+
+
+def _extraction_groups(episodes: list[MemoryItem]) -> list[list[MemoryItem]]:
+    """턴 일화는 세션별로 묶어 추출기를 한 번만 부른다. 요약 일화는 이미 세션 단위라 하나씩 둔다."""
+    turns: dict[str | None, list[MemoryItem]] = {}
+    groups: list[list[MemoryItem]] = []
+    for episode in episodes:
+        if episode.source == TURN_SOURCE:
+            turns.setdefault(episode.scope.session_id, []).append(episode)
+        else:
+            groups.append([episode])
+    for group in turns.values():
+        group.sort(key=lambda e: int(e.metadata.get(TURN_INDEX, 0)))
+        groups.append(group)
+    return groups
+
+
+def _extraction_text(episode: MemoryItem) -> str:
+    """사용자 프로필은 사용자에 대한 사실이다. 턴 일화는 사용자 발화만 넘긴다. 답의 추천이 사용자 사실로 뽑혔다."""
+    if episode.source != TURN_SOURCE:
+        return episode.content
+    return USER_PREFIX + turn_parts(episode)[0]
+
+
+def source_text(episode: MemoryItem) -> str:
+    """사실을 뽑은 글. 턴 일화는 사용자 발화만이다(추출기에 발화만 넘긴다). "사용자: " 접두어는 뺀다."""
+    return turn_parts(episode)[0] if episode.source == TURN_SOURCE else episode.content
+
+
+def turn_parts(episode: MemoryItem) -> tuple[str, str]:
+    """턴 일화의 (사용자 발화, 답)."""
+    n = episode.metadata.get(TURN_USER_CHARS)
+    body = episode.content.removeprefix(USER_PREFIX)
+    if n is None:  # 이 키를 남기기 전에 쓴 턴 일화
+        user, _, answer = body.partition("\n답: ")
+        return user, answer
+    return body[: int(n)], body[int(n):].removeprefix("\n답: ")
+
+
+def turn_item_id(scope: MemoryScope, index: int, part: int = 0) -> str:
+    """턴 일화(part 0)와 조각 일화의 자연 키. 같은 세션, 턴 번호, 조각 번호면 같은 id 다."""
+    key = f"{scope.user_id}|{scope.agent_id}|{scope.session_id}|{index}" + (f"|{part}" if part else "")
+    return "turn_" + hashlib.sha1(key.encode()).hexdigest()[:27]
+
+
+def turn_contents(user: str, answer: str, max_parts: int = MAX_TURN_PARTS) -> list[str]:
+    """턴 일화 본문과 그 뒤 조각 일화 본문들. record_turn 이 쓰는 글자 그대로다."""
+    said = user[:TURN_CHARS]
+    head = f"{USER_PREFIX}{said}\n답: {answer[:TURN_CHARS]}"
+    parts = answer_parts(answer, max_parts)
+    return [head] + [f"{USER_PREFIX}{said[:PART_USER_CHARS]}\n답({n + 1}): {part}" for n, part in enumerate(parts, 1)]
+
+
+def answer_parts(answer: str, max_parts: int = MAX_TURN_PARTS) -> list[str]:
+    """턴 일화에 못 담은 답의 나머지를 문단 경계에서 TURN_CHARS 이하 조각으로 나눈다. 짧은 답이면 빈 목록.
+
+    잘린 문단은 처음부터 다시 담는다. 다만 그 문단이 TURN_CHARS 의 절반보다 앞에서 시작하면 자른 자리부터 담는다.
+    """
+    if max_parts <= 0 or len(answer) <= TURN_CHARS:
+        return []
+    start = answer.rfind("\n", 0, TURN_CHARS) + 1
+    if start < TURN_CHARS // 2:
+        start = TURN_CHARS
+    parts: list[str] = []
+    current = ""
+    for paragraph in (p.strip() for p in re.split(r"\n+", answer[start:])):
+        while len(paragraph) > TURN_CHARS:
+            if current:
+                parts.append(current)
+                current = ""
+            parts.append(paragraph[:TURN_CHARS])
+            paragraph = paragraph[TURN_CHARS:]
+        if not paragraph:
+            continue
+        if current and len(current) + 1 + len(paragraph) > TURN_CHARS:
+            parts.append(current)
+            current = paragraph
+        else:
+            current = f"{current}\n{paragraph}" if current else paragraph
+    if current:
+        parts.append(current)
+    # ponytail: 조각은 max_parts 개까지만 남긴다(답 약 3,000자), 더 긴 답의 뒤쪽 증거가 실제로 사라지면 상한을 올린다
+    return parts[:max_parts]
+
+
+def _short_args(args: dict[str, Any]) -> dict[str, Any]:
+    return {k: v[:MAX_STEP_ARG_CHARS] if isinstance(v, str) else v for k, v in args.items()}
+
+
+def _text_of(message: Message) -> str:
+    if isinstance(message.content, str):
+        return message.content
+    return message.text() if hasattr(message, "text") else ""
+
+
+def _in_window(item: MemoryItem, scope: MemoryScope, first_in_window: int) -> bool:
+    if item.source not in (TURN_SOURCE, TURN_PART_SOURCE) or item.scope.session_id != scope.session_id:
+        return False
+    return int(item.metadata.get(TURN_INDEX, 0)) >= first_in_window
+
+
+def _last_user_text(messages: list[Message], max_chars: int = 200) -> str:
+    for msg in reversed(messages):
+        if msg.role != "user":
+            continue
+        if isinstance(msg.content, str):
+            return msg.content[:max_chars]
+        return "".join(getattr(b, "text", "") for b in msg.content)[:max_chars]
+    return ""
+
+
+def _block(header: str, items: list[MemoryItem]) -> UserMessage:
+    body = "\n".join(f"- [{i.created_at.strftime('%Y-%m-%d')}] {i.content}{_referent_line(i)}" for i in items)
+    return UserMessage(content=f"{header}\n{body}", timestamp=int(time.time() * 1000))
+
+
+def _referent_line(item: MemoryItem) -> str:
+    referent = item.metadata.get(REFERENT)
+    if not referent:
+        return ""
+    return "\n  (가리킨 대화: " + " / ".join(line.strip() for line in str(referent).splitlines() if line.strip()) + ")"
+
+
+def _procedures_block(procedures: list[Procedure]) -> UserMessage:
+    # 설명이 없을 때만 "이름: " 꼬리를 뺀다. 설명 끝의 ":" 나 공백은 그대로 둔다
+    body = "\n".join(f"- /{p.name}: {p.description}" if p.description else f"- /{p.name}" for p in procedures)
+    return UserMessage(content=f"{PROCEDURES_HEADER}\n{body}", timestamp=int(time.time() * 1000))

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docs-mcp"
+version = "0.1.0"
+description = "문서 폴더 안의 행정문서를 docparse 로 읽고 고치는 MCP 서버. ash-mcp 컨테이너에서 뜬다"
+requires-python = ">=3.11"
+dependencies = [
+    "docparse",
+    "mcp>=2.0,<3",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+docs-mcp = "docs_mcp.docs_server:main"
+
+[tool.uv.sources]
+docparse = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docs_mcp"]
