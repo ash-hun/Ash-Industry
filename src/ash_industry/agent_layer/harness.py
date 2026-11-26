@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from ash_industry.agent_layer.agent_types import AgentContext, AgentEndEvent, AgentEvent, AgentLoopConfig
 from ash_industry.model_layer.model_types import AssistantMessage, ModelConfig, Tool, ToolResultMessage
+from ash_industry.model_layer.model_types import ImageContent, Message, TextContent, UserMessage
 from ash_industry.agent_layer.session.session_protocol import SessionRepo
 from ash_industry.agent_layer.loop import AgentEventSink, run_agent_loop
 from ash_industry.agent_layer.turn_inbox import QueuedMessage, TurnInbox
@@ -66,10 +67,11 @@ class AgentHarness:
         extra_context: dict[str, Any] | None = None,
         channel: TurnChannel | None = None,
         inbox: TurnInbox | None = None,
+        images: list[ImageContent] | None = None,
     ) -> AssistantMessage | None:
-        """channel 을 주면 이벤트가 그 길로 간다. 턴을 뒤로 넘겼으면(channel.detached) 루프가 만든 메시지를
+        """images 는 이번 턴 모델 호출에만 붙인다. 기록에는 글만 남긴다.
+        channel 을 주면 이벤트가 그 길로 간다. 턴을 뒤로 넘겼으면(channel.detached) 루프가 만든 메시지를
         대화 기록에 남기지 않고 channel.produced 에 둔다. 넘긴 뒤 이 세션에 다른 턴이 먼저 끝날 수 있어서다."""
-        from ash_industry.model_layer.model_types import UserMessage
 
         self._running = True
         # 프로바이더나 저장소가 던져도 실행 중 표시는 풀린다. 남으면 is_running 이 영원히 True 다
@@ -90,6 +92,8 @@ class AgentHarness:
                 **(extra_context or {}),
             }
             messages = await self._memory.observe(history, mem_context) if self._memory else history
+            if images:
+                messages = with_images(messages, images)
 
             agent_context = AgentContext(
                 session_id=self._session_id,
@@ -177,3 +181,15 @@ class AgentHarness:
     @property
     def is_running(self) -> bool:
         return self._running
+
+
+def with_images(messages: list[Message], images: list[ImageContent]) -> list[Message]:
+    """마지막 사용자 메시지에 그림을 붙인 새 목록. 원래 목록과 기록은 그대로 둔다. 순수 함수."""
+    out = list(messages)
+    for i in range(len(out) - 1, -1, -1):
+        msg = out[i]
+        if isinstance(msg, UserMessage):
+            parts = [TextContent(text=msg.content)] if isinstance(msg.content, str) else list(msg.content)
+            out[i] = msg.model_copy(update={"content": [*parts, *images]})
+            break
+    return out

@@ -7,6 +7,7 @@ from typing import Any, Literal, Annotated
 from collections.abc import Mapping, Sequence
 from pydantic import Field, BaseModel, ConfigDict, field_validator, model_validator
 
+from docparse.template.slot_text import slot_span, box_positions
 from docparse.document_model import Document, cell_id
 
 TOKEN = re.compile(r"\{\{(\w+)\}\}")
@@ -14,8 +15,10 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATE_RANGE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})$")
 INTEGER = re.compile(r"^-?\d+$")
 TEMPLATE_ID = r"^[0-9A-Za-z가-힣_-]{1,64}$"
+# 본문 문단(p3)이나 표 칸 안 문단(t0r1c2p0)
+PARAGRAPH_ID = r"^(p\d+|t\d+r\d+c\d+p\d+)$"
 
-FieldType = Literal["text", "long_text", "date", "date_range", "number"]
+FieldType = Literal["text", "long_text", "date", "date_range", "number", "choice"]
 FillValue = str | int | float
 # 문단과 표가 있는 형식. anchor_text 는 이 형식에만 쓴다
 TEXT_FORMATS = ("docx", "hwpx", "hwp")
@@ -85,6 +88,26 @@ class ShapeTextLocator(BaseModel):
     shape: int = Field(ge=1)
 
 
+class InlineSlotLocator(BaseModel):
+    """DOCX, HWPX 문단(id)에서 label 바로 뒤 첫 빈 괄호 안. 괄호와 뒤 글은 그대로 두고 안쪽만 값으로 바꾼다."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["inline_slot"] = "inline_slot"
+    paragraph: str = Field(pattern=PARAGRAPH_ID)
+    label: str = Field(min_length=1, max_length=40)
+
+
+class CheckboxLocator(BaseModel):
+    """DOCX, HWPX 문단(id)의 `□ 선택지` 들. 고른 선택지 앞 칸만 ■ 로 칠하고 나머지는 □ 로 둔다."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["checkbox"] = "checkbox"
+    paragraph: str = Field(pattern=PARAGRAPH_ID)
+    options: tuple[str, ...] = Field(min_length=1, max_length=20)
+
+
 class FormFieldLocator(BaseModel):
     """PDF AcroForm 필드 이름(전체 이름). 체크박스는 켜는 값 이름(보통 /Yes)이나 Off."""
 
@@ -96,7 +119,7 @@ class FormFieldLocator(BaseModel):
 
 AnyLocator = (
     PlaceholderLocator | TableCellLocator | AnchorTextLocator | SheetCellLocator | ShapeTextLocator
-    | FormFieldLocator
+    | FormFieldLocator | InlineSlotLocator | CheckboxLocator
 )
 Locator = Annotated[AnyLocator, Field(discriminator="kind")]
 
@@ -109,7 +132,22 @@ class TemplateField(BaseModel):
     required: bool = True
     max_chars: int | None = Field(default=None, ge=1)
     max_lines: int | None = Field(default=None, ge=1)
+    # choice 의 값은 이 중 하나다. checkbox 자리는 비우면 로케이터의 선택지를 쓴다
+    options: tuple[str, ...] = Field(default=(), max_length=20)
     locator: Locator
+
+    @model_validator(mode="after")
+    def _choice_options(self) -> "TemplateField":
+        if isinstance(self.locator, CheckboxLocator):
+            if not self.options:
+                object.__setattr__(self, "options", self.locator.options)
+            elif not set(self.options) <= set(self.locator.options):
+                raise ValueError("options 는 checkbox 로케이터의 선택지 안에서 고른다")
+            if self.type != "choice":
+                raise ValueError("checkbox 자리의 필드는 type choice 다")
+        if self.type == "choice" and not self.options:
+            raise ValueError("choice 필드는 options 가 있어야 한다")
+        return self
 
 
 class TemplateSchema(BaseModel):
@@ -170,13 +208,27 @@ def schema_from_placeholders(
     )
 
 
+def _inline_issue(loc: InlineSlotLocator | CheckboxLocator, texts: Mapping[str, str]) -> str:
+    text = texts.get(loc.paragraph)
+    if text is None:
+        return f"문단이 없다 {loc.paragraph}"
+    if isinstance(loc, InlineSlotLocator):
+        return "" if slot_span(text, loc.label) else f"{loc.paragraph} 에 '{loc.label}' 뒤 빈 괄호가 없다"
+    return "" if box_positions(text, loc.options) else f"{loc.paragraph} 에 선택지 칸이 없다 {', '.join(loc.options)}"
+
+
 def check_locators(schema: TemplateSchema, document: Document) -> list[str]:
     """필드마다 채울 자리가 문서에 실제로 있는지. 형식에 맞지 않는 로케이터도 문제로 적는다."""
     texts = document.texts()
     issues: list[str] = []
     for item in schema.fields:
         loc = item.locator
-        if isinstance(loc, PlaceholderLocator):
+        if isinstance(loc, InlineSlotLocator | CheckboxLocator):
+            if document.format not in TEXT_FORMATS:
+                issues.append(f"{item.name}: {loc.kind} 는 DOCX, HWPX 만")
+            elif problem := _inline_issue(loc, texts):
+                issues.append(f"{item.name}: {problem}")
+        elif isinstance(loc, PlaceholderLocator):
             if not any(loc.token in t for t in texts.values()):
                 issues.append(f"{item.name}: 문서에 {loc.token} 이 없다")
         elif isinstance(loc, SheetCellLocator):
@@ -240,6 +292,9 @@ def _parse_number(value: Any) -> int | float | None:
 
 
 def _type_issue(item: TemplateField, value: Any) -> str:
+    if item.type == "choice":
+        ok = isinstance(value, str) and value.strip() in item.options
+        return "" if ok else f"선택지 중 하나({', '.join(item.options)})"
     if item.type == "number":
         return "" if _parse_number(value) is not None else "숫자가 아니다"
     if item.type in ("text", "long_text"):

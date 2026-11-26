@@ -5,6 +5,7 @@ import json
 import uuid
 import asyncio
 from typing import Any
+from pathlib import Path
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from ash_industry.ui.web.ws_tasks import (
@@ -16,11 +17,13 @@ from ash_industry.ui.web.ws_tasks import (
     run_stt,
     run_tts,
 )
+from ash_industry.app.upload_store import Upload, UploadStore, describe
 from ash_industry.core.notify import spoken_notice_text, spoken_payload
 from ash_industry.ui.web.web_auth import auth_enabled, lookup_api_user
 from ash_industry.ui.web.router.agent_router import agent_summary
 from ash_industry.core.focus.focus_types import parse_command
 from ash_industry.memory.scope import LOCAL_USER, MemoryScope
+from ash_industry.model_layer.model_types import ImageContent
 from ash_industry.ui.web.session_registry import UnknownAgent
 from ash_industry.voice.english import should_speak_english
 from ash_industry.voice.speech_text import speech_text
@@ -29,6 +32,8 @@ from ash_industry.common.logger import get_logger
 from ash_industry.voice.wake import WakeDetector
 
 # 키 불일치로 서버가 끊을 때의 close code. 브라우저가 이 코드를 보고 키 입력을 띄운다
+# 메시지 하나에 붙이는 첨부 수 상한
+MAX_ATTACHMENTS = 10
 WS_UNAUTHORIZED = 4401
 # 정의에 없는 에이전트로 새 세션을 열려 할 때. 브라우저는 재연결하지 않고 오류를 보인다
 WS_UNKNOWN_AGENT = 4404
@@ -58,10 +63,27 @@ async def receive_frame(ws: WebSocket) -> dict[str, Any] | bytes:
     return parsed
 
 
+def attachments_of(store: UploadStore, raw: Any) -> list[Upload]:
+    """ws 가 보낸 첨부 id 중 실제로 올라온 것만. 모르는 id 는 버린다(최대 10개)."""
+    ids = raw if isinstance(raw, list) else []
+    found = [store.find(str(i)) for i in ids[:MAX_ATTACHMENTS]]
+    return list({u.id: u for u in found if u is not None}.values())
+
+
+def images_of(store: UploadStore, uploads: list[Upload]) -> list[ImageContent]:
+    images = []
+    for upload in uploads:
+        data = store.image_base64(upload)
+        if data is not None:
+            images.append(ImageContent(data=data, mime_type=upload.mime))
+    return images
+
+
 def build_ws_router(state: WebState) -> APIRouter:
     router = APIRouter()
     ctx = state.ctx
     settings = state.settings
+    uploads = UploadStore(Path(settings.docs.dir))
 
     @router.websocket("/ws")
     async def websocket_endpoint(
@@ -182,16 +204,17 @@ def build_ws_router(state: WebState) -> APIRouter:
 
                 if msg_type == "user_message":
                     text = msg.get("text", "").strip()
-                    if text:
+                    attached = attachments_of(uploads, msg.get("attachments"))
+                    if text or attached:
                         state.registry.touch(session_id)
-                        focus_command = parse_command(text) if state.focus is not None else None
+                        focus_command = parse_command(text) if state.focus is not None and text else None
                         if state.focus is not None and focus_command is not None:
                             asyncio.create_task(
                                 run_focus(session, adapter, state.focus, focus_command, credentials)
                             )
                             continue
                         # 슬래시 명령 인터셉트: 텍스트 어디서나 /command 를 처리하고 나머지만 LLM 으로 보낸다
-                        if ctx.dispatcher is not None:
+                        if ctx.dispatcher is not None and text:
                             # /remember 같은 명령이 이 연결의 사용자 범위로 기억을 쓰게 한다
                             scope = MemoryScope(
                                 user_id=user.name if user is not None else LOCAL_USER,
@@ -206,6 +229,9 @@ def build_ws_router(state: WebState) -> APIRouter:
                             if result.fully_consumed:
                                 continue
                             text = result.remaining_text
+                        if attached:
+                            # 에이전트가 경로로 파일을 열도록 메시지 끝에 붙인다. 기록에도 이 글이 남는다
+                            text = f"{text.strip()}\n\n{describe(attached)}".strip()
                         if text.strip():
                             # 답하는 중이면 대기열로. 도구 결과 뒤에 같은 턴으로, 아니면 턴이 끝난 뒤 다음 턴으로 간다
                             message_id = queue_id_of(msg.get("id"))
@@ -220,7 +246,10 @@ def build_ws_router(state: WebState) -> APIRouter:
                                     "type": "queue_delivered", "session_id": session_id,
                                     "items": [{"id": message_id, "text": text}],
                                 })
-                            asyncio.create_task(run_prompt(session, adapter, text, credentials))
+                            # ponytail: 대기열과 steer 로 간 말은 첨부 안내 글만 가고 그림은 빠진다,
+                            # 답하는 중에 이미지를 자주 보내면 대기열 항목에 그림을 싣는다
+                            images = images_of(uploads, attached)
+                            asyncio.create_task(run_prompt(session, adapter, text, credentials, images))
 
                 elif msg_type == "approval_response":
                     broker.resolve(

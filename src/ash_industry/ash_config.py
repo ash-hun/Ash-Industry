@@ -85,6 +85,8 @@ class SecurityConfig(BaseModel):
     # MCP 도구 정책(서버, 도구별 allow, ask, deny, 인자 고정, 시간당 상한)과 호출 기록
     mcp_policy_path: str = "~/.ash/mcp_policy.yaml"
     mcp_audit_path: str = "~/.ash/mcp_audit.jsonl"
+    # 에이전트별 auto mode(승인을 묻지 않고 허용). HUD 토글이 쓴다
+    auto_approve_path: str = "~/.ash/auto_approve.yaml"
 
 
     @field_validator("dangerous_commands")
@@ -298,6 +300,8 @@ class ProactiveConfig(BaseModel):
     cooldown_sec: int = 300  # 세션별 proactive 발화 쿨다운
     # 🔔 뒤 답이 없으면 다시 말하지 않는다. 이만큼 답이 없으면 그 발화를 한 번 약한 무시로 학습
     ignore_after_sec: int = 600
+    # 답을 끝내 못 받은 🔔 의 대기를 이만큼 지나면 푼다. 풀지 않으면 그 세션은 메일, 일정 알림을 영영 못 받는다
+    awaiting_expire_sec: int = 1800
     daemon_enabled: bool = True  # B3 백그라운드 성찰 루프 (기본 on, false로 끔)
     daemon_interval_sec: int = 120  # 성찰 주기(초) — interval 트리거용. 로컬과 배포 모두 이 값
     # 성찰 트리거: interval(주기) | idle(조용해지면) | both(둘 중 먼저)
@@ -505,6 +509,8 @@ class DocsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     dir: str = "/data/documents"
+    # 채팅 첨부(<dir>/uploads, compose 는 호스트 임시 폴더를 붙인다)를 마지막으로 올린 뒤 이만큼 지나면 지운다
+    upload_ttl_hours: float = 24.0
 
 
 class AshSettings(BaseSettings):

@@ -57,3 +57,20 @@ def test_build_mcp_sources_skips_disabled_and_unknown_server() -> None:
     sources = build_mcp_sources(specs, [_server()])
 
     assert [s.name for s in sources] == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_poll_treats_sign_in_prompt_as_failure_until_it_recovers() -> None:
+    replies = iter([
+        "**ACTION REQUIRED: Google Authentication Needed for me**\nAuthorization URL: https://x/?state=a",
+        "**ACTION REQUIRED: Google Authentication Needed for me**\nAuthorization URL: https://x/?state=b",
+        json.dumps([{"id": "m1", "subject": "공지"}]),
+    ])
+
+    async def flaky(server, tool, params) -> str:
+        return next(replies)
+
+    source = McpToolSource(_spec(), _server(), call=flaky)
+
+    assert await source.poll() == [] and await source.poll() == []
+    assert [e.key for e in await source.poll()] == ["cal:m1"]

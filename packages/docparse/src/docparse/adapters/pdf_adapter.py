@@ -48,6 +48,12 @@ def _field_pages(reader: PdfReader) -> dict[str, int]:
     return pages
 
 
+def _options(field: Any) -> tuple[str, ...]:
+    """체크박스는 켜고 끄는 값 이름(pypdf 의 /_States_), 선택 필드는 선택지(쌍이면 내보내는 값)."""
+    states = field.get("/_States_") or field.get("/Opt") or []
+    return tuple(str(o[0] if isinstance(o, list) else o) for o in states)
+
+
 def _fields(reader: PdfReader) -> tuple[FormField, ...]:
     # ponytail: 서명(/Sig)과 값 없는 상위 노드는 other 로 싣는다, 계층 폼에서 헷갈리면 잎만 남긴다
     raw = reader.get_fields() or {}
@@ -60,7 +66,7 @@ def _fields(reader: PdfReader) -> tuple[FormField, ...]:
         value = field.get("/V")
         out.append(FormField(
             id=form_field_id(name), name=name, value="" if value is None else str(value),
-            kind=FIELD_KINDS.get(str(field["/FT"]), "other"), page=pages.get(name, 0),
+            kind=FIELD_KINDS.get(str(field["/FT"]), "other"), page=pages.get(name, 0), options=_options(field),
         ))
     return tuple(out)
 
@@ -70,7 +76,9 @@ def _lines(reader: PdfReader) -> tuple[Paragraph, ...]:
     out: list[Paragraph] = []
     for n, page in enumerate(reader.pages, start=1):
         lines = [line.strip() for line in (page.extract_text() or "").splitlines() if line.strip()]
-        out.extend(Paragraph(id=paragraph_id(k, f"pg{n}"), text=line) for k, line in enumerate(lines))
+        out.extend(
+            Paragraph(id=paragraph_id(k, f"pg{n}"), text=line, editable=False) for k, line in enumerate(lines)
+        )
     return tuple(out)
 
 

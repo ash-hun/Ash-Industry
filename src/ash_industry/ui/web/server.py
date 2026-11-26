@@ -6,14 +6,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, Request, Response
 from collections.abc import Awaitable, Callable
 
+from ash_industry.ui.web.router.auto_approve_router import build_auto_approve_router
 from ash_industry.ui.web.web_auth import auth_enabled, bearer_token, lookup_api_user
 from ash_industry.ui.web.router.brand_router import STATIC_DIR, build_brand_router
 from ash_industry.ui.web.router.creative_router import build_creative_router
+from ash_industry.ui.web.router.doc_edit_router import build_doc_edit_router
 from ash_industry.ui.web.router.platform_router import build_platform_router
 from ash_industry.ui.web.router.settings_router import build_settings_router
 from ash_industry.ui.web.router.workflow_router import build_workflow_router
 from ash_industry.ui.web.router.session_router import build_session_router
 from ash_industry.ui.web.router.agenda_router import build_agenda_router
+from ash_industry.ui.web.router.upload_router import build_upload_router
 from ash_industry.ui.web.router.agent_router import build_agent_router
 from ash_industry.ui.web.router.voice_router import build_voice_router
 from ash_industry.ui.web.router.docs_router import build_docs_router
@@ -75,6 +78,9 @@ def create_app(
     app.include_router(build_voice_router(state))
     app.include_router(build_creative_router(state))
     app.include_router(build_docs_router(state))
+    app.include_router(build_doc_edit_router(state))
+    app.include_router(build_upload_router(state))
+    app.include_router(build_auto_approve_router(state))
     app.include_router(build_workflow_router(state))
     app.include_router(build_mcp_router(state))
     app.include_router(build_platform_router(state))

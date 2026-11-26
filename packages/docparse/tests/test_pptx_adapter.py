@@ -2,7 +2,10 @@
 
 import pytest
 from pathlib import Path
+from pptx.util import Inches
 from pptx import Presentation
+from pptx.enum.chart import XL_CHART_TYPE
+from pptx.chart.data import CategoryChartData
 
 from docparse import EditPlan, Replacement, TemplateSchema, check_locators, verify_fill, fill, apply, inspect, to_html
 
@@ -24,6 +27,42 @@ def test_inspect_gives_stable_shape_and_table_ids(pptx_path: Path) -> None:
     (table,) = doc.tables
     assert (table.id, table.rows, table.cols, table.name) == ("t0", 2, 2, "슬라이드 2")
     assert {c.id: c.text for c in table.cells}["t0r1c1"] == "{{기간}}"
+
+
+def test_notes_and_chart_text_are_read_only(tmp_path: Path) -> None:
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    data = CategoryChartData()
+    data.categories = ["1분기", "2분기"]
+    data.add_series("매출", (10.0, 12.5))
+    frame = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, 0, 0, Inches(4), Inches(3), data)
+    frame.chart.has_title = True
+    frame.chart.chart_title.text_frame.text = "분기 매출"
+    slide.notes_slide.notes_text_frame.text = "천천히 말한다"
+    path = tmp_path / "차트.pptx"
+    prs.save(str(path))
+    doc = inspect(path)
+    readonly = [(p.id, p.text, p.style) for p in doc.paragraphs if not p.editable]
+    chart = f"s0c{frame.shape_id}"
+    assert readonly == [
+        (f"{chart}p0", "분기 매출", "chart"), (f"{chart}p1", "항목: 1분기, 2분기", "chart"),
+        (f"{chart}p2", "매출: 10, 12.5", "chart"), ("s0np0", "천천히 말한다", "notes"),
+    ]
+    with pytest.raises(KeyError):
+        apply(path, EditPlan(replacements=(Replacement(target="s0np0", text="x"),)), tmp_path / "out.pptx")
+    assert "천천히 말한다" in to_html(path)
+
+
+def test_merged_table_cell_carries_span(tmp_path: Path) -> None:
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    table = slide.shapes.add_table(2, 3, 0, 0, Inches(4), Inches(1)).table
+    table.cell(0, 0).merge(table.cell(1, 1))
+    path = tmp_path / "병합.pptx"
+    prs.save(str(path))
+    cells = {c.id: c for c in inspect(path).tables[0].cells}
+    assert (cells["t0r0c0"].row_span, cells["t0r0c0"].col_span) == (2, 2)
+    assert (cells["t0r0c2"].row_span, cells["t0r0c2"].col_span) == (1, 1)
 
 
 def test_replace_keeps_first_run_and_source(pptx_path: Path, tmp_path: Path) -> None:

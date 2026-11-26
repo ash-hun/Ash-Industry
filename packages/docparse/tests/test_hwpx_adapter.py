@@ -28,6 +28,7 @@ def test_inspect_gives_stable_ids_runs_and_cells(hwpx_path: Path) -> None:
     ]
     first, merged = doc.tables
     assert (first.id, first.rows, first.cols) == ("t0", 2, 2)
+    assert [first.anchor, merged.anchor] == [5, 6]
     cells = {c.id: c for c in first.cells}
     assert cells["t0r0c1"].text == "{{기간}}" and [p.id for p in cells["t0r0c1"].paragraphs] == ["t0r0c1p0"]
     assert [c.id for c in merged.cells if c.merged] == ["t1r0c1"]
@@ -139,3 +140,21 @@ def test_broken_file_raises_value_error(tmp_path: Path) -> None:
     bad.write_bytes(b"not a zip")
     with pytest.raises(ValueError):
         inspect(bad)
+
+
+def test_fill_inline_slot_and_checkbox(tmp_path: Path) -> None:
+    path = tmp_path / "괄호.hwpx"
+    with HwpxDocument.new() as doc:
+        doc.paragraphs[0].text = "성명(      ) 연락처(      )"
+        doc.add_paragraph("□ 예 □ 아니오")
+        doc.save_to_path(path)
+    schema = _schema([
+        {"name": "연락처", "locator": {"kind": "inline_slot", "paragraph": "p0", "label": "연락처"}},
+        {"name": "여부", "type": "choice",
+         "locator": {"kind": "checkbox", "paragraph": "p1", "options": ["예", "아니오"]}},
+    ])
+    assert check_locators(schema, inspect(path)) == []
+    texts = fill(path, schema, {"연락처": "010", "여부": "예"}, tmp_path / "out.hwpx").texts()
+    assert texts["p0"] == "성명(      ) 연락처(010)" and texts["p1"] == "■ 예 □ 아니오"
+    wrong = _schema([{"name": "a", "locator": {"kind": "inline_slot", "paragraph": "p1", "label": "성명"}}])
+    assert check_locators(wrong, inspect(path)) == ["a: p1 에 '성명' 뒤 빈 괄호가 없다"]

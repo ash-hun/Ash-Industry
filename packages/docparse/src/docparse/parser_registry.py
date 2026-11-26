@@ -3,9 +3,11 @@
 import shutil
 from pathlib import Path
 from typing import Any, Literal
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
-from docparse.template.template_schema import TemplateSchema, TemplateValueError, validate_values, build_assignments
+from docparse.template.template_schema import (
+    TemplateField, TemplateSchema, TemplateValueError, validate_values, build_assignments,
+)
 from docparse.render.render_service import LibreOfficeRenderer
 from docparse.adapters.docx_adapter import DocxAdapter
 from docparse.adapters.hwpx_adapter import HwpxAdapter
@@ -24,6 +26,8 @@ SUPPORTED_SUFFIXES: tuple[str, ...] = tuple(s for a in _ADAPTERS for s in a.suff
 # HWP 는 읽기만 하고 결과는 HWPX 로 쓴다. LibreOffice 는 HWPX 를 열지 못해 rhwp 가 그린다
 WRITE_SUFFIX: dict[str, str] = {".hwp": ".hwpx"}
 RHWP_SUFFIXES: tuple[str, ...] = (".hwpx", ".hwp")
+# 글을 넣을 수 있는 자리. 체크 칸과 PDF 폼 필드는 {{이름}} 글을 둘 곳이 아니다
+TOKEN_KINDS = ("table_cell", "anchor_text", "sheet_cell", "shape_text", "inline_slot")
 # 잠금이 호출 사이에 걸려야 렌더가 한 번에 하나씩 돈다
 _RHWP = RhwpRenderer()
 
@@ -63,6 +67,15 @@ def fill(path: Path, schema: TemplateSchema, values: Mapping[str, Any], out_path
     if issues:
         raise TemplateValueError(issues)
     return adapter_for(path).fill(path, build_assignments(schema, values), out_path)
+
+
+def place_tokens(path: Path, fields: Sequence[TemplateField], out_path: Path) -> Document:
+    """빈 양식의 자리마다 `{{이름}}` 을 넣은 사본을 out_path 에 저장한다. 원본은 두고 같은 필드면 같은 결과.
+    토큰은 값 검사를 통과하지 못하므로 검사 없이 어댑터에 바로 넘긴다."""
+    bad = [f.name for f in fields if f.locator.kind not in TOKEN_KINDS]
+    if bad:
+        raise ValueError(f"자리표시자를 둘 수 없는 자리(체크 칸, 폼 필드, 자리표시자): {', '.join(bad)}")
+    return adapter_for(path).fill(path, {f.locator: f"{{{{{f.name}}}}}" for f in fields}, out_path)
 
 
 def to_html(path: Path) -> str:

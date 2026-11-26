@@ -145,6 +145,8 @@ class GoalRunner:
         replay 를 주면 지난 차례의 도구를 먼저 다시 불러, 결과가 글자 그대로 같으면 모델을 부르지 않는다."""
         goal = self._store.get(goal_id)
         if goal is None or goal.status != "active":
+            # 멈추거나 지운 목표의 스케줄이 남아 있으면 매시 조용히 지나가 돌았는지 알 수 없다
+            logger.info(f"[Goal] {goal_id} skipped={'missing' if goal is None else goal.status}")
             return ""
         now = self._now()
         started = time.perf_counter()

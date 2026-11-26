@@ -47,3 +47,14 @@ def test_policy_rejects_unknown_mode_and_fields(client):
     bad_limit = {"servers": {"google": {"tools": {"x": {"calls_per_hour": -1}}}}}
     assert c.put("/api/mcp/policy", json=bad_limit).status_code == 422
     assert c.put("/api/mcp/policy", json={"bogus": 1}).status_code == 422
+
+
+def test_policy_effective_follows_agent_query(client):
+    c, _ = client
+    doc = {"agents": {"evi": {"servers": ["docs"]}}}
+    saved = c.put("/api/mcp/policy?agent=evi", json=doc).json()
+    assert saved["agent"] == "evi" and {t["effective"] for t in saved["tools"]} == {"deny"}
+    main = c.get("/api/mcp/policy").json()
+    assert main["agent"] == "main" and {t["effective"] for t in main["tools"]} == {"allow", "ask"}
+    assert {t["effective"] for t in c.get("/api/mcp/policy?agent=evi").json()["tools"]} == {"deny"}
+    assert c.get("/api/mcp/policy?agent=../x").status_code == 422

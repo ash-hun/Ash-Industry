@@ -1,10 +1,11 @@
-// 입력창 — 전송, 일하는 동안 보낸 말(대기, 지금 보내기, 되가져오기), 슬래시 명령 자동완성, 입력 하이라이트, 중단.
+// 입력창 — 전송(첨부 포함), 일하는 동안 보낸 말(대기, 지금 보내기, 되가져오기), 슬래시 명령 자동완성, 입력 하이라이트, 중단.
 import { send } from './ws.js';
 import { newQueueId, queuedCount, sendNow, takeBack, markShown } from './queue.js';
 import { escapeHtml } from './markdown.js';
 import { setStatus } from './shell.js';
 import { appendMsg, streamEnd, showAwaitPlaceholder, hideAwaitPlaceholder } from './messages.js';
 import { noteFocusCommand } from './focus.js';
+import { hasAttachments, takeAttachments } from './attachments.js';
 
 const $input          = document.getElementById('chat-input');
 const $sendBtn        = document.getElementById('send-btn');
@@ -73,28 +74,39 @@ function askNotificationPermission() {
 
 // 대화에 이미 올린 사용자 텍스트를 서버로 보내고 대기 표시로 들어간다. 음성 전사도 같은 길을 탄다.
 // 에이전트가 일하는 중이면 대기 말로 보낸다. 대화에는 건네질 때(queue_delivered) 붙는다
-export function sendUserText(text) {
+export function sendUserText(text, attachments = []) {
   const id = newQueueId();
+  const extra = attachments.length ? { attachments: attachments.map((a) => a.id) } : {};
   if (_turnBusy) {
-    send({ type: 'user_message', text, id, queued: true });
+    send({ type: 'user_message', text, id, queued: true, ...extra });
     return;
   }
   // 말풍선은 이미 붙였다. 서버가 이 말을 뒤에서 도는 작업으로 보내며 queue_delivered 로 알려 와도 다시 붙이지 않는다
   markShown(id);
-  send({ type: 'user_message', text, id });
+  send({ type: 'user_message', text, id, ...extra });
   noteFocusCommand(text);
   beginAwaitingReply();
   if (/(^|\s)\/schedule\b/.test(text)) askNotificationPermission();
 }
 
+function attachmentLines(attachments) {
+  return attachments.map((a) => `📎 ${escapeHtml(a.name)}`).join('<br>');
+}
+
 async function submitMessage() {
   const text = $input.value.trim();
-  if (!text) return;
+  if (!text && !hasAttachments()) return;
   if (_slashVisible) return; // 팝업이 열려 있으면 keydown 이 처리한다
-  if (!_turnBusy) appendMsg('USER', 'user', escapeHtml(text));
   $input.value = '';
   updateHighlight();
-  sendUserText(text);
+  // 올리는 중인 파일은 끝날 때까지 기다린다. 실패한 파일은 칩으로 남는다
+  const attachments = await takeAttachments();
+  if (!text && !attachments.length) return;
+  if (!_turnBusy) {
+    const body = [escapeHtml(text), attachmentLines(attachments)].filter(Boolean).join('<br>');
+    appendMsg('USER', 'user', body);
+  }
+  sendUserText(text, attachments);
 }
 
 document.getElementById('composer').addEventListener('submit', (e) => {

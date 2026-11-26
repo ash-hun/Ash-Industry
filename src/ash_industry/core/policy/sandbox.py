@@ -8,6 +8,9 @@ from ash_industry.core.policy.pipeline import ApprovalResult, Decision, PolicyRe
 from ash_industry.core.policy.approval_rules import ApprovalRule, ApprovalRules, describe, suggest_pattern
 from ash_industry.ash_config import DEFAULT_DANGEROUS_COMMANDS
 from ash_industry.core.policy.mcp_gate import McpGate
+from ash_industry.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 승인 콜백의 답. True/False 는 이번 한 번, "always" 는 제안된 패턴을 규칙으로 남긴다.
 ApprovalChoice = bool | str
@@ -36,6 +39,7 @@ class DefaultSandbox(SandboxProtocol):
         approval_rules: ApprovalRules | None = None,
         mcp_gate: McpGate | None = None,
         agent_id: str = "main",
+        auto_approve: Callable[[], bool] | None = None,
     ) -> None:
         # None 이면 기본 목록, 빈 목록이면 차단을 끈다. 설정에서 []를 주면 그 뜻 그대로 따른다
         patterns = DEFAULT_DANGEROUS_COMMANDS if dangerous_patterns is None else dangerous_patterns
@@ -48,6 +52,9 @@ class DefaultSandbox(SandboxProtocol):
         # MCP 도구는 정책 문이 먼저 본다(인자 고정, deny, 에이전트 제한, 시간당 상한). ask 면 아래 승인 흐름을 탄다
         self._mcp_gate = mcp_gate
         self._agent_id = agent_id
+        # auto mode. 켜져 있으면 물을 호출을 묻지 않고 허용한다. 위험 명령과 정책 deny 는 그 앞에서 막힌다.
+        # 매번 불러 읽으므로 HUD 에서 바꾸면 세션을 다시 만들지 않아도 바로 따른다
+        self._auto_approve = auto_approve
         self.policy_reason = ""  # 마지막 "policy" 판정의 이유. 세션이 도구 결과에 싣는다
 
     async def approve(
@@ -92,6 +99,9 @@ class DefaultSandbox(SandboxProtocol):
             return "allow"
         if self._rules is not None and self._rules.allows(tool_name, params):
             return "allow"
+        if self.auto_mode():
+            logger.info(f"[Sandbox] auto mode allowed '{tool_name}' for agent '{self._agent_id}'")
+            return "allow"
         pattern = suggest_pattern(tool_name, params) if self._rules is not None else ""
         shown = describe(tool_name, params)
         if verdict is not None and self._mcp_gate is not None:
@@ -118,7 +128,13 @@ class DefaultSandbox(SandboxProtocol):
             return self._mcp_gate.effective_mode(tool_name, self._agent_id) == "ask"
         return tool_name in self._require_approval
 
+    def auto_mode(self) -> bool:
+        return self._auto_approve is not None and self._auto_approve()
+
     def approval_tools(self) -> list[str]:
+        """승인을 묻는 도구. auto mode 면 묻지 않으므로 빈 목록이다(프롬프트에 승인 규칙을 붙이지 않는다)."""
+        if self.auto_mode():
+            return []
         asks = self._mcp_gate.ask_tools(self._agent_id) if self._mcp_gate is not None else []
         return sorted(self._require_approval | set(asks))
 

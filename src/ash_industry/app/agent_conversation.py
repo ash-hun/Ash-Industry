@@ -5,7 +5,8 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 from collections.abc import Awaitable, Callable
 
-from ash_industry.model_layer.model_types import AssistantMessage, TextContent, ToolResultMessage
+from ash_industry.model_layer.model_types import Artifact, AssistantMessage, TextContent, ToolResultMessage
+from ash_industry.core.tools.tool_artifacts import peer_artifacts, collect_peer_artifacts
 from ash_industry.agent_layer.session.session_protocol import PEER_SESSION_PREFIX
 from ash_industry.core.tools.tools_registry import AshTool, ToolContext
 from ash_industry.agent_layer.openloop.openloop_types import same_loop
@@ -145,6 +146,9 @@ class AskAgentTool(AshTool):
         target_name = self._name_of(target)
         token = peer_chain.set((*chain, target))
         request_token = peer_request.set(message)
+        # 받는 쪽 도구가 만든 결과물(렌더한 문서, 영상)은 그쪽 세션 화면에만 가므로 모아서 이 결과에 싣는다
+        collected: list[Artifact] = []
+        artifacts_token = peer_artifacts.set(collected)
         try:
             session = await self._opener(target, peer_session_id(caller, target), getattr(context, "session_id", None))
             logger.info(f"[Team] {caller} 가 {target} 에게 요청: {message[:80]}")
@@ -158,8 +162,13 @@ class AskAgentTool(AshTool):
         finally:
             peer_chain.reset(token)
             peer_request.reset(request_token)
+            peer_artifacts.reset(artifacts_token)
         logger.info(f"[Team] {target} 가 {caller} 에게 답: {reply[:80]}")
-        return _result(tool_call_id, f"[{target_name} 의 답]\n{reply or '(빈 답)'}")
+        result = _result(tool_call_id, f"[{target_name} 의 답]\n{reply or '(빈 답)'}")
+        result.artifacts = collected
+        # 이 턴도 누군가에게 맡겨진 것이면 한 단계 위로 넘긴다
+        collect_peer_artifacts(collected)
+        return result
 
     def _name_of(self, agent_id: str) -> str:
         profile = self._agents.get(agent_id)

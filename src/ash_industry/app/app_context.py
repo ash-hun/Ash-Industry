@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ash_industry.core.scheduler.notice_store import PendingNoticeStore
     from ash_industry.core.slash.dispatcher import SlashCommandDispatcher
     from ash_industry.core.workflow.workflow_store import WorkflowStore
+    from ash_industry.core.policy.auto_approve import AutoApproveStore
     from ash_industry.core.procedures.learner import ProcedureLearner
     from ash_industry.core.proactive.feedback import FeedbackLearner
     from ash_industry.app.extension_watcher import ExtensionWatcher
@@ -66,3 +67,5 @@ class AppContext:
     extension_commands: list["ExtensionCommand"] = field(default_factory=list)
     # MCP 도구 정책 문. mcp_servers 가 있을 때만 만든다
     mcp_gate: "McpGate | None" = field(default=None)
+    # 에이전트별 auto mode. web 세션의 sandbox 가 매번 읽는다
+    auto_approve: "AutoApproveStore | None" = field(default=None)

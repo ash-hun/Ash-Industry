@@ -172,3 +172,22 @@ async def test_decide_returns_policy_with_reason_when_the_gate_denies(tmp_path):
     assert "고정 값" in sandbox.policy_reason
     # 승인 콜백까지 가지 않는다
     assert await sandbox.decide("bash", {"command": "ls"}) == "allow"
+
+
+async def test_auto_mode_allows_asking_calls_but_keeps_blocks_and_reads_live():
+    on = {"value": True}
+    asked: list[str] = []
+
+    async def ask(command: str, reason: str, pattern: str = "") -> bool:
+        asked.append(command)
+        return False
+
+    sandbox = DefaultSandbox(require_approval_for=["write_file"], auto_approve=lambda: on["value"])
+    sandbox.set_approval_callback(ask)
+
+    assert await sandbox.decide("write_file", {"path": "a.md"}) == "allow"
+    assert await sandbox.decide("bash", {"command": "rm -rf /"}) == "blocked"
+    assert sandbox.approval_tools() == []
+    on["value"] = False
+    assert await sandbox.decide("write_file", {"path": "a.md"}) == "deny"
+    assert asked and sandbox.approval_tools() == ["write_file"]

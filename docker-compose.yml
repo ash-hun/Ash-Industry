@@ -99,6 +99,9 @@ services:
       - ${ASH_CREATIVE_DIR:-~/Creative/ash}:/data/creative
       # 행정문서 폴더. HUD 문서 창이 docs 서버가 만든 .render/ 의 쪽 그림과 PDF 를 읽는다. 쓰기는 ash-mcp 만 한다
       - ${ASH_DOCS_DIR:-~/Documents/ash}:/data/documents:ro
+      # 채팅 첨부파일. 호스트 임시 폴더를 문서 폴더의 uploads/ 자리에 붙인다(24시간 뒤 백엔드가 지운다).
+      # 백엔드가 쓰는 곳은 이것 하나뿐이고 나머지 문서 폴더는 읽기 전용 그대로다
+      - ${ASH_UPLOAD_DIR:-/tmp/ash-uploads}:/data/documents/uploads
       # 로컬 코드를 그대로 쓴다 — 파이썬 수정 후 이미지 재빌드 없이
       # `docker compose restart ash-backend` 만으로 반영된다.
       - ./src:/app/src
@@ -168,6 +171,8 @@ services:
       - mcp_data:/data
       # 행정문서 폴더. docs MCP 서버는 이 안만 읽고 쓴다(결과는 원본 옆 .edited-<시각>, 렌더는 .render/)
       - ${ASH_DOCS_DIR:-~/Documents/ash}:/data/documents
+      # 채팅 첨부(임시 폴더). 백엔드와 같은 uploads/ 경로로 보여 Evi 가 첨부를 그대로 연다
+      - ${ASH_UPLOAD_DIR:-/tmp/ash-uploads}:/data/documents/uploads
     ports:
       # Google OAuth 콜백(http://localhost:<MCP_GOOGLE_PORT>/oauth2callback)이 브라우저에서 와야 한다. 호스트 밖에는 열지 않는다
       - "127.0.0.1:${MCP_GOOGLE_PORT:-8808}:8000"

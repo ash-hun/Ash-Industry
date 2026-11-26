@@ -115,3 +115,28 @@ async def test_web_search_network_error_returns_error_result(monkeypatch):
 )
 def test_parse_ddg_html_skips_ads_and_unwraps_links(page, limit, expected):
     assert parse_ddg_html(page, limit) == expected
+
+
+async def test_web_search_passes_freshness_and_shows_source_and_date(monkeypatch):
+    seen = route_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(200, json={"web": {"results": [{
+            "title": "공고", "url": "https://apply.lh.or.kr/n/1", "description": "<strong>청년</strong> 모집",
+            "page_age": "2026-11-20T09:00:00",
+        }]}}),
+    )
+    monkeypatch.setattr(get_settings().web_search, "brave_api_key", SecretStr("test-key"))
+
+    result = await WebSearchTool().execute("c1", {"query": "행복주택", "freshness": "week"})
+
+    assert seen[0].url.params["freshness"] == "pw"
+    assert "Source: apply.lh.or.kr, 2026-11-20" in result.content[0].text and "청년 모집" in result.content[0].text
+
+
+async def test_web_search_with_freshness_skips_undated_instant_answers(monkeypatch):
+    seen = route_httpx(monkeypatch, _ddg("<html></html>", {"Abstract": "백과 요약", "RelatedTopics": []}))
+
+    result = await WebSearchTool().execute("c1", {"query": "test", "freshness": "day"})
+
+    assert "No results found" in result.content[0].text
+    assert [r.url.host for r in seen] == ["html.duckduckgo.com"] and b"df=d" in seen[0].content

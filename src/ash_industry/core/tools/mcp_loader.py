@@ -6,7 +6,7 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable, AsyncIterator
 
-from ash_industry.core.tools.tool_artifacts import document_artifacts, artifacts_from_result
+from ash_industry.core.tools.tool_artifacts import docs_artifacts, artifacts_from_result, collect_peer_artifacts
 from ash_industry.core.tools.tools_registry import AshTool
 from ash_industry.common.logger import get_logger
 
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 # /api/creative/files/, docs 서버의 렌더 파일은 /api/docs/files/ 로 내준다. 다른 서버의 글은 첨부하지 않는다
 ARTIFACT_RULES: "dict[str, Callable[[str], list[Artifact]]]" = {
     "media": artifacts_from_result,
-    "docs": document_artifacts,
+    "docs": docs_artifacts,
 }
 
 
@@ -57,6 +57,7 @@ class MCPToolWrapper(AshTool):
                 self._gate.record_result(self.name, ok=True)
             rule = ARTIFACT_RULES.get(self._server.name)
             artifacts = rule(result_text) if rule is not None else []
+            collect_peer_artifacts(artifacts)
             return ToolResultMessage(
                 tool_call_id=tool_call_id,
                 tool_name=self.name,

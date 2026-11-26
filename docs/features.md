@@ -27,11 +27,11 @@
 | `agent_conversation` | 최상위 에이전트끼리 일을 맡기고 되묻는 대화. 담당 에이전트가 있는 일은 먼저 위임한다 | `ask_agent` 도구, 모든 에이전트의 시스템 프롬프트 끝 팀 규칙 | 구현됨 |
 | `agent_loop` | 한 턴의 LLM 호출과 도구 실행 반복 | ws `user_message` | 구현됨 |
 | `agent_registry` | 정의 파일로 최상위 에이전트를 더하고 화면 브랜드를 바꾼다 | `GET /api/agents`, `GET /brand.js`, `ash-industry --agent <id>` | 구현됨 |
-| `approval` | 위험한 도구 실행 전 사용자 승인과 "항상 허용" 규칙 | ws `approval_request` / `approval_response` | 구현됨 |
+| `approval` | 위험한 도구 실행 전 사용자 승인과 "항상 허용" 규칙, 에이전트별 auto mode | ws `approval_request` / `approval_response`, 입력 독 AUTO, `/api/auto-approve` | 구현됨 |
 | `cli` | `ash-industry` 명령으로 Web HUD 백엔드를 띄우고 시작 세션을 고른다 | `ash-industry [--session <id>] [--agent <id>] [--host] [--port]`, `ash-industry --list-sessions` | 구현됨 |
 | `desktop` | HUD 를 창 하나로 띄우고 트레이 상주, 전역 단축키, OS 알림을 맡는 Electron 셸. GitHub Release 의 dmg 로 받는다 | `cd desktop && npm start`, Release 의 `AshIndustry-<버전>-<arch>.dmg`, 트레이 메뉴, 전역 단축키 | 구현됨 |
 | `docparse` | 행정문서(DOCX, XLSX, HWPX, PPTX, HWP 읽기, PDF 는 폼 필드만 쓰기)를 id 가 붙은 구조로 읽고, 서식을 유지한 채 지정한 곳만 고치거나 양식 템플릿을 채우고, 렌더하는 독립 파서 패키지 | `packages/docparse`(`docparse.inspect`, `apply`, `fill`, `render`) | 구현 중 |
-| `docs_mcp` | 행정문서 MCP 서버. 문서 폴더의 문서를 읽고 편집 계획을 보인 뒤 승인된 계획만 새 파일로 저장하고, 등록한 양식 템플릿을 값으로 채운다. 어느 에이전트가 쓸지는 MCP 정책이 정한다 | docs MCP 서버의 `list_documents`, `inspect_document`, `plan_edit`, `apply_edit`, `render_document`, `list_templates`, `get_template_schema`, `register_template`, `fill_template`, `detect_fields` | 구현 중 |
+| `docs_mcp` | 행정문서 MCP 서버. 문서 폴더의 문서를 읽고 편집 계획을 보인 뒤 승인된 계획만 새 파일로 저장하고, 등록한 양식 템플릿을 값으로 채운다. 어느 에이전트가 쓸지는 MCP 정책이 정한다 | docs MCP 서버의 `list_documents`, `inspect_document`, `plan_edit`, `apply_edit`, `render_document`, `list_templates`, `get_template_schema`, `register_template`, `fill_template`, `detect_fields`, `create_document`, `make_placeholder_copy` | 구현 중 |
 | `extension` | 확장 디렉터리의 파이썬 패키지가 에이전트 전용 도구와 슬래시 명령을 등록한다. 개인 도구를 플랫폼 밖에 둔다 | `~/.ash/extensions/<이름>/__init__.py` 의 `register(ctx)`, `ASH_PLUGIN__EXTENSIONS_DIR` | 구현됨 |
 | `external` | 캘린더, 메일 같은 외부 변화를 주기적으로 읽어 성찰에 먹인다 | `~/.ash/external_sources/*.yaml` | 구현됨 |
 | `focus` | 한 작업을 네 sub-agent 의 도움으로 끝까지 수행하는 모드 | `/focus <작업>` (Web HUD) | 구현됨 |
@@ -64,6 +64,7 @@
 | `turn_detach` | Dual-Channel: 오래 걸리는 턴은 작은 모델의 선응답으로 먼저 닫고 코어 모델은 뒤에서 이어 돌아 끝나면 답한다. 도는 작업은 HUD 리액터 둘레의 별로 보인다 | ws `user_message`(7.5초 넘는 턴), `connected.background_tasks`, ws `background_tasks` | 구현됨 |
 | `usermodel` | 누적 기억에서 사용자 모델을 증류한다 | `/usermodel` | 구현됨 |
 | `voice` | 서버와 브라우저 STT/TTS, 읽기 문구, 웨이크워드 | ws `voice_tts_request`, `voice_stt_submit`, 바이너리 프레임, `GET /api/voice/phrases/{name}` | 구현됨 |
+| `upload` | HUD 채팅에 파일을 첨부해 에이전트에게 경로와 그림으로 건넨다 | 입력 독 📎, 끌어다 놓기, `POST /api/uploads`, ws `user_message.attachments` | 구현됨 |
 | `web_hud` | 브라우저 HUD 화면 셸, 화면 전환(HUD, FLOW, SET), FastAPI 앱 기동 | `ash-industry`, `/` 화면 | 구현됨 |
 | `workflow` | 에이전트 사이 위임을 관계 그래프로, 지금 세션의 위임을 시간과 토큰이 적힌 에이전트 지도로, 백그라운드 작업의 마지막 실행을 접힌 표로 보인다 | `GET /api/workflow?session=`, `GET /api/jobs`, ws `workflow_changed`, `job_changed`, HUD `FLOW` 화면 | 구현됨 |
 
@@ -139,7 +140,6 @@
 |---|---|
 | 단위 | `tests/unit/test_agent_loop_agent_types.py` |
 | 단위 | `tests/unit/test_agent_loop_anthropic.py` |
-| 단위 | `tests/unit/test_agent_loop_gemini.py` |
 | 단위 | `tests/unit/test_agent_loop_harness.py` |
 | 단위 | `tests/unit/test_agent_loop_loop.py` |
 | 단위 | `tests/unit/test_agent_loop_loop_overflow.py` |
@@ -222,14 +222,21 @@
 | 120초 무응답 | 거부로 처리, `approval_resolved{timeout:true}` |
 | 요청 때 붙은 연결이 없음 | 화면이 한 번이라도 붙었던 세션(다른 에이전트로 옮겨 감)이면 기다리고, 돌아온 연결에 요청을 보낸다. 다른 세션을 보는 HUD 에는 `approval_waiting` 으로 "승인 대기 · 이동" 띠를 띄운다. 화면이 붙은 적 없는 세션(스케줄, 헤드리스)은 바로 거부 |
 | `command` 가 `security.dangerous_commands` 에 걸리는 호출 | 묻지 않고 막는다. "항상 허용" 규칙보다 먼저 본다. 스케줄 작업과 목표 차례도 같다 |
+| 승인 필요 도구 | `security.require_approval_for`, MCP 정책 ask 도구. 프로필 `boundaries.ask` 는 무인 실행(목표 차례, 스케줄, 먼저 해 두기)에서만 본다. 대화로 시킨 일은 이미 물은 것으로 본다 |
+| 입력 독 AUTO, SET 의 AUTO MODE, `PUT /api/auto-approve/{agent}` | 그 에이전트의 auto mode 를 `~/.ash/auto_approve.yaml`(`ASH_SECURITY__AUTO_APPROVE_PATH`)에 저장. 켜지면 물을 호출을 묻지 않고 허용한다(위험 명령, MCP deny, `never` 는 그 앞에서 막힌다). 열린 세션도 다음 호출부터 따른다. 프롬프트의 승인 규칙 안내도 빠진다 |
 
-**처리 흐름**: 도구 실행기에서 `sandbox.decide` 로, 위험 명령 검사, `approval_rules` 대조, `SessionApprovals` 가 연결 전부에 요청, 첫 답 채택, `approval_rules` 저장 순.
+**처리 흐름**: 도구 실행기에서 `sandbox.decide` 로, 위험 명령 검사, MCP deny, 승인 필요 여부, `approval_rules` 대조, auto mode 확인, `SessionApprovals` 가 연결 전부에 요청, 첫 답 채택, `approval_rules` 저장 순.
 
 **구현 파일**
 
 | 파일 | 층 | 역할 |
 |---|---|---|
 | `src/ash_industry/core/policy/approval_rules.py` | core | "항상 허용" 규칙 YAML 저장과 대조 |
+| `src/ash_industry/core/policy/auto_approve.py` | core | 에이전트별 auto mode 저장소(깨진 파일이면 모두 꺼짐) |
+| `src/ash_industry/core/policy/sandbox.py` | core | `decide` 의 auto mode 허용, `approval_tools` 는 auto mode 면 빈 목록 |
+| `src/ash_industry/ui/web/session_registry.py` | ui | 세션 sandbox 에 그 에이전트의 auto mode 읽기 함수를 넣는다 |
+| `src/ash_industry/ui/web/router/auto_approve_router.py` | ui | `GET /api/auto-approve`, `PUT /api/auto-approve/{agent}` |
+| `src/ash_industry/ui/web/static/app/auto-mode.js` | ui | 입력 독 AUTO 토글과 SET 의 AUTO MODE 목록 |
 | `src/ash_industry/ui/web/approvals.py` | ui | 세션 하나의 승인 요청을 연결 전부에 보내고 먼저 온 답을 쓴다 |
 | `src/ash_industry/ui/web/static/app/approval.js` | ui | 승인 모달과 음성 답 해석(`parseApprovalAnswer`) |
 | `src/ash_industry/ui/web/web_state.py` | ui | 세션별 브로커 생성, 승인 대기 목록(`waiting_approvals`)과 `approval_waiting` 방송 |
@@ -242,9 +249,11 @@
 | 단위 | `tests/unit/test_approval_approval_rules.py` |
 | 단위 | `tests/unit/test_approval_approvals.py` |
 | 단위 | `tests/unit/test_policy_sandbox.py` |
+| 단위 | `tests/unit/test_policy_auto_approve.py` |
 | 통합 | `tests/integ/test_approval.py` |
+| 통합 | `tests/integ/test_auto_approve.py` |
 
-**제약과 미구현**: 음성 승인 답에 부정어가 있으면 분류 없이 거부한다. 에어팟에서 승인 되읽기가 들리는지 실기기 확인 전이다(`TODO.md`).
+**제약과 미구현**: auto mode 는 화면이 붙는 대화 세션에만 적용한다. 스케줄, 목표 차례, 먼저 해 두기 같은 무인 실행은 지금처럼 묻지 않고 거부한다. 자동 허용한 호출은 로그(`[Sandbox] auto mode allowed`)와 MCP 호출 기록의 ask 판정으로 남는다. 음성 승인 답에 부정어가 있으면 분류 없이 거부한다. 에어팟에서 승인 되읽기가 들리는지 실기기 확인 전이다(`TODO.md`).
 
 ---
 
@@ -341,21 +350,22 @@
 
 | 입력 | 결과 |
 |---|---|
-| `inspect(path)` | `Document`: 본문 문단 `p<n>`(run 포함), 표 `t<i>`, 셀 `t<i>r<r>c<c>`, 셀 안 문단 `t<i>r<r>c<c>p<k>`. 같은 파일은 같은 id. XLSX 는 시트 하나가 표 하나이고 셀에 주소(`B3`)가 붙는다. HWPX 는 DOCX 와 같은 id 이고(본문 문단마다 `p<n>`, 표가 든 문단도 하나), 병합 칸은 왼쪽 위 칸 하나로 `merged`. `.hwp` 는 `format: hwp` 이고 `meta` 에 옮기지 못한 내용 수. PPTX 는 글 도형의 문단이 `s<슬라이드>sh<shape_id>p<k>`(그룹 안까지, style 은 도형 이름), 표는 슬라이드를 가로질러 `t<i>`(name 은 `슬라이드 <n>`, 병합에 덮인 칸은 뺌), `meta.slides`. PDF 는 쪽마다 빈 줄을 뺀 글 줄 `pg<쪽>p<k>`(고치기 대상 아님)와 `fields`(AcroForm 필드 `f:<전체 이름>`, kind text/checkbox/choice/other, 값, 처음 나온 쪽), `meta.pages`. 다른 형식의 `fields` 는 빈 값 |
+| `inspect(path)` | `Document`: 본문 문단 `p<n>`(run 포함), 표 `t<i>`, 셀 `t<i>r<r>c<c>`, 셀 안 문단 `t<i>r<r>c<c>p<k>`. 같은 파일은 같은 id. XLSX 는 시트 하나가 표 하나이고 셀에 주소(`B3`)가 붙는다. HWPX 는 DOCX 와 같은 id 이고(본문 문단마다 `p<n>`, 표가 든 문단도 하나), 병합 칸은 왼쪽 위 칸 하나로 `merged` 이고 `row_span`, `col_span` 에 차지하는 행과 열 수가 붙는다(DOCX, HWPX, XLSX, PPTX). XLSX 의 빈 병합 범위는 왼쪽 위 칸을 빈 글로 싣는다. DOCX, HWPX 의 표는 `anchor` 에 본문에서 그 앞에 오는 문단 수를 싣는다(HWPX 는 표를 품은 문단 바로 뒤, 다른 형식은 -1). `.hwp` 는 `format: hwp` 이고 `meta` 에 옮기지 못한 내용 수. PPTX 는 글 도형의 문단이 `s<슬라이드>sh<shape_id>p<k>`(그룹 안까지, style 은 도형 이름), 표는 슬라이드를 가로질러 `t<i>`(name 은 `슬라이드 <n>`, 병합에 덮인 칸은 뺌), 차트 글은 `s<슬라이드>c<shape_id>p<k>`(제목, `항목: ...`, 계열마다 `이름: 값, 값`, style chart), 노트는 `s<슬라이드>np<k>`(style notes), `meta.slides`. 차트와 노트 문단은 `editable` 이 거짓이라 읽기만 한다. PDF 는 쪽마다 빈 줄을 뺀 글 줄 `pg<쪽>p<k>`(`editable` 거짓)와 `fields`(AcroForm 필드 `f:<전체 이름>`, kind text/checkbox/choice/other, 값, 처음 나온 쪽), `meta.pages`. 다른 형식의 `fields` 는 빈 값 |
 | `preview(document, plan)` | 바뀔 곳(before, after)과 문제(없는 대상, 같은 대상 두 번, 변화 없음, 항목 없음). 순수 함수 |
 | `apply(path, plan, out_path)` | 계획을 적용해 `out_path` 에 저장하고 다시 읽은 구조. 원본은 두고, 같은 입력이면 같은 결과. DOCX 는 첫 run 에 글을 넣고 나머지 run 을 지워 글꼴과 굵기를 남기고, 셀 전체 치환은 첫 문단만 남긴다. XLSX 는 숫자였던 칸에 숫자 꼴 글이 오면 숫자로 둔다. HWPX 는 글이 있는 첫 run 에 넣어 그 run 의 글자 모양(charPrIDRef)을 남기고 글만 있는 나머지 run 을 지운다(구역 설정, 표가 든 run 은 남김). `save_to_path(mode="patch")` 로 손대지 않은 파트를 바이트 그대로 두고, 그럴 수 없으면 저장하지 않는다(HWP 에서 연 문서만 다시 묶는다). 결과 경로는 `.hwpx` 만 받는다. PPTX 는 DOCX 와 같은 run 규칙(도형 문단, 셀, 셀 안 문단). PDF 는 `ValueError`(본문은 고치지 않는다) |
 | `verify_edit(before, after, plan)` | 대상마다 계획한 글이 들어갔는가, 계획 밖이 바뀌지 않았는가(셀과 그 안 문단은 한 묶음), id 가 사라지지 않았는가, `{{` 가 남지 않았는가 |
-| `TemplateSchema`, `TemplateField` | 템플릿 id(한글, 영문, 숫자, `-`, `_` 64자까지), 형식(docx, xlsx, hwpx, hwp, pptx, pdf), 종류(placeholder, blank_form), 원본 sha256, 필드(이름, type: text, long_text, date, date_range, number, required, max_chars, max_lines, locator). locator 는 `placeholder{token}`, `table_cell{table,row,col}`(DOCX, HWPX, PPTX), `anchor_text{after}`(DOCX, HWPX), `sheet_cell{sheet,cell}`(XLSX), `shape_text{slide,shape}`(PPTX 도형 글 전체), `form_field{name}`(PDF) |
+| `TemplateSchema`, `TemplateField` | 템플릿 id(한글, 영문, 숫자, `-`, `_` 64자까지), 형식(docx, xlsx, hwpx, hwp, pptx, pdf), 종류(placeholder, blank_form), 원본 sha256, 필드(이름, type: text, long_text, date, date_range, number, choice, required, max_chars, max_lines, options, locator). choice 는 options 중 하나만 받고, checkbox 자리의 필드는 choice 여야 하며 options 를 비우면 로케이터의 선택지를 쓴다. locator 는 `placeholder{token}`, `table_cell{table,row,col}`(DOCX, HWPX, PPTX), `anchor_text{after}`(DOCX, HWPX), `sheet_cell{sheet,cell}`(XLSX), `shape_text{slide,shape}`(PPTX 도형 글 전체), `form_field{name}`(PDF), `inline_slot{paragraph,label}`(DOCX, HWPX 문단 id 안 라벨 바로 뒤 첫 빈 괄호), `checkbox{paragraph,options}`(DOCX, HWPX 문단 id 안 `□ 선택지` 묶음) |
 | `scan_placeholders(document)` | 문단과 셀 글의 `{{이름}}` 을 처음 나온 순서로 한 번씩. 이름은 한글 포함 단어 글자 |
 | `schema_from_placeholders(id, document, hash, hints)` | 찾은 자리표시자마다 text 필드. hints 는 같은 이름 필드의 type 등을 덮는다. 자리표시자가 없거나 문서에 없는 hint 면 `ValueError` |
 | `check_locators(schema, document)` | 필드마다 자리가 문서에 있는가(자리표시자, 표 칸 범위, 기준 글, 시트)와 형식에 맞는 로케이터인가. 문제 목록 |
 | `validate_values(schema, values)` | 모르는 필드, 빠진 필수 필드, date(`YYYY-MM-DD`), date_range(`시작 ~ 끝`, 시작이 끝보다 늦지 않게), number(숫자나 쉼표 있는 숫자 글), max_chars, max_lines. 문제 목록 |
 | `render_value(field, value)` | 문서에 들어갈 글. 숫자는 쉼표 없이, 기간은 `시작 ~ 끝` |
-| `fill(path, schema, values, out_path)` | 값 검사(문제가 있으면 `TemplateValueError`, 파일은 만들지 않음) 뒤 로케이터마다 넣어 저장하고 다시 읽은 구조. 원본은 두고 같은 값이면 같은 결과. DOCX 와 HWPX 자리표시자는 run 여럿에 걸쳐도 시작 run 의 서식으로 합치고 토큰 밖 run 은 그대로 둔다. table_cell 은 셀 전체 치환, anchor_text 는 기준 글 뒤에 글이 있으면 그 글을, 없으면 다음 문단을 바꾼다. XLSX sheet_cell 은 빈 칸에도 쓰고 number 필드는 숫자로, 칸 전체가 토큰 하나인 자리표시자도 숫자로 둔다. `=` 로 시작하는 값은 수식이 아닌 글로 저장한다. PPTX 는 자리표시자(도형과 표 칸), shape_text(첫 문단 첫 run 만 남겨 서식 유지), table_cell. PDF 는 form_field 만 쓰고 `NeedAppearances` 를 켜 보는 쪽이 외형을 다시 그리게 한다(pypdf 외형은 한글 글꼴이 없어 쓰지 않는다). 자리가 없으면 `KeyError` |
-| `detect_fields(document)` | 빈 양식의 채울 자리 후보 `FieldCandidate[{name, label, type, required, locator, rule, confidence}]`. 순수 함수라 같은 문서면 같은 목록과 순서. 규칙은 본문 문단 `라벨:`(전각 `：` 포함) 뒤가 비었거나 밑줄(`_`, `＿`)만 있으면 anchor_text(뒤가 비면 다음 문단이 빈 줄일 때만, 같은 기준 글이 앞 문단에 있으면 뺀다), 표에서 라벨 칸의 오른쪽 칸이 비면 table_cell(라벨이 20자 이하이고 문장이 아니면 high, 아니면 low), 오른쪽이 없거나 차 있고 바로 아래 칸이 비면 아래 칸(low), XLSX 는 글 라벨 칸의 오른쪽 주소가 비면 sheet_cell(숫자, 수식, 병합 머리 칸은 라벨로 보지 않음), PPTX 는 표 규칙만, PDF 는 글과 선택 폼 필드마다 form_field(라벨은 전체 이름의 마지막 마디, high, 선택 필드). `{{` 가 든 칸과 문단은 라벨도 빈 칸도 아니고, 같은 칸은 오른쪽 규칙이 먼저다. type 은 라벨 낱말로(기간 date_range, 일자/날짜/생년월일/일시 date, 금액/수량/비용/개수/액 number, 사유/내용/목적/비고/요청사항 long_text, 그 밖 text), name 은 라벨의 글자와 숫자만(비면 `field`, 겹치면 `_2`, `_3`). `to_field()` 로 `TemplateField` |
+| `place_tokens(path, fields, out_path)` | 빈 양식의 자리마다 `{{이름}}` 을 넣은 사본을 저장하고 다시 읽은 구조. 값 검사를 건너뛰고 어댑터의 채우기를 바로 쓴다. checkbox, form_field, placeholder 자리는 `ValueError` |
+| `fill(path, schema, values, out_path)` | 값 검사(문제가 있으면 `TemplateValueError`, 파일은 만들지 않음) 뒤 로케이터마다 넣어 저장하고 다시 읽은 구조. 원본은 두고 같은 값이면 같은 결과. DOCX 와 HWPX 자리표시자는 run 여럿에 걸쳐도 시작 run 의 서식으로 합치고 토큰 밖 run 은 그대로 둔다. table_cell 은 셀 전체 치환, anchor_text 는 기준 글 뒤에 글이 있으면 그 글을, 없으면 다음 문단을 바꾼다. XLSX sheet_cell 은 빈 칸에도 쓰고 number 필드는 숫자로, 칸 전체가 토큰 하나인 자리표시자도 숫자로 둔다. `=` 로 시작하는 값은 수식이 아닌 글로 저장한다. PPTX 는 자리표시자(도형과 표 칸), shape_text(첫 문단 첫 run 만 남겨 서식 유지), table_cell. inline_slot 은 괄호 안쪽만 값으로 바꿔 괄호와 뒤 글, run 서식을 둔다. checkbox 는 고른 선택지 앞 칸을 `■`, 나머지 칸을 `□` 로 한 글자씩 바꾼다. PDF 는 form_field 만 쓰고 `NeedAppearances` 를 켜 보는 쪽이 외형을 다시 그리게 한다(pypdf 외형은 한글 글꼴이 없어 쓰지 않는다). 자리가 없으면 `KeyError` |
+| `detect_fields(document)` | 빈 양식의 채울 자리 후보 `FieldCandidate[{name, label, type, required, options, locator, rule, confidence}]`. 순수 함수라 같은 문서면 같은 목록과 순서. 규칙은 본문 문단 `라벨:`(전각 `：` 포함) 뒤가 비었거나 밑줄(`_`, `＿`)만 있으면 anchor_text(뒤가 비면 다음 문단이 빈 줄일 때만, 같은 기준 글이 앞 문단에 있으면 뺀다), 표에서 라벨 칸의 병합 폭 바로 다음 열에서 시작하는 칸이 비면 table_cell(라벨이 20자 이하이고 문장이 아니면 high, 아니면 low), 오른쪽이 없거나 차 있고 행 병합 폭 바로 아래 칸이 비면 아래 칸(low), XLSX 는 글 라벨 칸의 병합 폭 바로 오른쪽 주소가 비었거나 빈 병합 범위의 왼쪽 위 칸이면 sheet_cell(숫자, 수식은 라벨로 보지 않고, 다른 병합 범위에 덮인 자리는 뺀다), DOCX, HWPX 의 본문과 표 칸 안 문단에서 `라벨(   )` 처럼 낱말 바로 뒤 빈 괄호(공백이나 밑줄 2자 이상)마다 inline_slot(같은 문단의 같은 라벨은 한 번), `□`, `☐` 칸 묶음마다 checkbox(type choice, options 는 칸 뒤 낱말, 끝의 괄호 자리는 뗌, 라벨은 첫 칸 앞 글이나 바로 왼쪽 칸 글, 둘 다 없으면 `선택` 이고 low, 선택지가 둘 이상이면 필수), PPTX 는 표 규칙만, PDF 는 글, 선택, 체크박스 폼 필드마다 form_field(라벨은 전체 이름의 마지막 마디, high, 선택 필드, 선택지가 있으면 choice 와 options. 받는 값 이름이 없는 체크박스는 뺀다). 칸 기호가 든 글은 표 라벨로 보지 않는다. `{{` 가 든 칸과 문단은 라벨도 빈 칸도 아니고, 같은 칸은 오른쪽 규칙이 먼저다. type 은 라벨 낱말로(기간 date_range, 일자/날짜/생년월일/일시 date, 금액/수량/비용/개수/액 number, 사유/내용/목적/비고/요청사항 long_text, 그 밖 text), name 은 라벨의 글자와 숫자만(비면 `field`, 겹치면 `_2`, `_3`). `to_field()` 로 `TemplateField` |
 | `suggest_template_id(path)` | 파일 이름(NFC 로 합친 뒤 허용 밖 글자는 `_`)에 `-v1`. 남는 글자가 없으면 `form-v1` |
 | `verify_fill(after, schema, values)` | 값 검사, 필드의 `{{이름}}` 이 남지 않았는가, 채운 값이 제자리(셀, 시트 칸, 문단 안)에 있는가 |
-| `render(path, "html" \| "pdf" \| "png", out_dir)` | html 은 어댑터(DOCX 는 mammoth, XLSX 와 HWPX 는 직접 만든 표와 문단. 본문 이스케이프), pdf 는 LibreOffice headless, png 는 pdftoppm. HWPX 와 HWP 는 LibreOffice 가 열지 못해 rhwp 가 프로세스 안에서 pdf 와 쪽마다 png(`<이름>-<쪽>.png`, 110dpi)를 만든다(200쪽 넘으면 거부). PDF 원본은 LibreOffice 없이 `out_dir` 에 사본을 두고 png 는 그 사본을 pdftoppm 으로. 만든 파일 경로 목록. 프로그램이 없거나 실패하면 `RenderUnavailable` |
+| `render(path, "html" \| "pdf" \| "png", out_dir)` | html 은 어댑터(DOCX 는 mammoth, XLSX 와 HWPX 는 직접 만든 표와 문단. 본문 이스케이프), pdf 는 LibreOffice headless, png 는 pdftoppm. HWPX 와 HWP 는 LibreOffice 가 열지 못해 rhwp 가 쪽마다 SVG 를 만들고, `rsvg-convert` 가 있으면 그것이 fontconfig 글꼴로 pdf 와 쪽마다 png(`<이름>-<쪽>.png`, 110dpi)를 그린다(없으면 rhwp 가 직접 그린다. 200쪽 넘으면 거부). PDF 원본은 LibreOffice 없이 `out_dir` 에 사본을 두고 png 는 그 사본을 pdftoppm 으로. 만든 파일 경로 목록. 프로그램이 없거나 실패하면 `RenderUnavailable` |
 | `output_suffix(path)` | 결과 파일 확장자. 원본 그대로이고 `.hwp` 만 `.hwpx` |
 
 **처리 흐름**: `parser_registry` 에서 확장자로 어댑터 고르기, 어댑터의 `inspect` / `replace` / `fill` / `to_html`(채우기는 `template_schema` 의 값 검사와 로케이터별 값 만들기를 먼저 한다), `render_service` 의 LibreOffice 와 poppler 호출(한 번에 하나, 프로필 디렉터리 분리), HWP 계열은 `rhwp_renderer`(한 번에 하나), `verify_service` 대조 순.
@@ -376,51 +386,56 @@
 | `packages/docparse/src/docparse/adapters/pptx_adapter.py` | service | PPTX(python-pptx) 도형 글과 표 |
 | `packages/docparse/src/docparse/adapters/pdf_adapter.py` | service | PDF(pypdf) 글 줄 읽기와 AcroForm 폼 필드 채우기 |
 | `packages/docparse/src/docparse/render/render_service.py` | client | LibreOffice, pdftoppm 호출과 쪽 수 |
-| `packages/docparse/src/docparse/render/rhwp_renderer.py` | client | rhwp 로 HWPX, HWP 의 PDF, PNG |
+| `packages/docparse/src/docparse/render/rhwp_renderer.py` | client | rhwp 로 HWPX, HWP 의 SVG 를 만들고 rsvg-convert(없으면 rhwp)로 PDF, PNG |
 | `packages/docparse/src/docparse/verify/verify_service.py` | service | 편집과 채우기 결과 검증(순수) |
 | `packages/docparse/src/docparse/template/template_schema.py` | schema | 템플릿 스키마, 로케이터, 자리표시자 찾기, 값 검사와 글 만들기(순수) |
 | `packages/docparse/src/docparse/template/field_detect.py` | service | 빈 양식 필드 후보 탐지와 템플릿 id 제안(순수) |
+| `packages/docparse/src/docparse/template/slot_text.py` | schema | 문단 글 안의 빈 괄호 자리와 체크 칸 위치(순수) |
 
 **테스트**
 
 | 종류 | 파일 |
 |---|---|
-| 단위 | `packages/docparse/tests/test_docx_adapter.py` |
+| 단위 | `packages/docparse/tests/test_docx_adapter.py`(빈 괄호와 체크 칸 탐지, 채우기, 검증) |
 | 단위 | `packages/docparse/tests/test_xlsx_adapter.py` |
 | 단위 | `packages/docparse/tests/test_hwpx_adapter.py`(HWPX 왕복, run 서식, 병합, HWP 읽기) |
-| 단위 | `packages/docparse/tests/test_pptx_adapter.py`(도형과 표 id, run 서식, 채우기 셋, 로케이터 검사) |
+| 단위 | `packages/docparse/tests/test_pptx_adapter.py`(도형과 표 id, run 서식, 채우기 셋, 로케이터 검사, 노트와 차트 읽기 전용, 병합 폭) |
 | 단위 | `packages/docparse/tests/test_pdf_adapter.py`(글 줄과 폼 필드, 폼 채우기와 검증, 본문 고치기 거부, 탐지, 렌더 사본) |
-| 단위 | `packages/docparse/tests/test_edit_plan.py` |
+| 단위 | `packages/docparse/tests/test_edit_plan.py`(바뀔 곳, 문제, 읽기 전용 거절) |
 | 단위 | `packages/docparse/tests/test_verify_service.py` |
 | 단위 | `packages/docparse/tests/test_render_service.py` |
-| 단위 | `packages/docparse/tests/test_template_schema.py` |
-| 단위 | `packages/docparse/tests/test_field_detect.py`(규칙마다 정상과 경계, 병합 칸 중복 없음, 형식과 이름 추측, 템플릿 id) |
+| 단위 | `packages/docparse/tests/test_template_schema.py`(choice 와 checkbox 선택지, 잘못된 로케이터 모양) |
+| 단위 | `packages/docparse/tests/test_slot_text.py`(괄호 안쪽 범위, 라벨, 선택지, 칸 위치) |
+| 단위 | `packages/docparse/tests/test_field_detect.py`(규칙마다 정상과 경계, 병합 칸 중복 없음, 병합 폭 따라 오른쪽과 아래 칸, XLSX 빈 병합 범위와 덮인 자리, PDF 체크박스 choice, 칸 기호 글은 라벨 아님, 형식과 이름 추측, 템플릿 id) |
 
-**제약과 미구현**: PPTX 는 슬라이드 노트, 차트 글, 마스터의 글을 읽지 않는다(`# ponytail`). PDF 는 본문을 고치지 않고 폼 필드만 채우며, 서명 필드와 값 없는 상위 노드는 kind other 로 싣는다(`# ponytail`). 채운 PDF 의 외형은 보는 프로그램이 다시 그리므로 pdftoppm 렌더에 값이 안 보일 수 있다. 테스트의 PDF 는 pypdf 로 만든 작은 폼이고 실제 공문 PDF 양식은 아직 확인하지 않았다. `detect_fields` 는 규칙 기반이라 빈 괄호(`(   )`), `□` 체크 칸, 그림으로 본 검토, 자리표시자 사본 만들기는 하지 않는다. IR 에 병합 폭이 없어 표의 오른쪽 칸은 같은 행에서 다음으로 실린 칸으로 보고(세로 병합이 끼면 틀릴 수 있다), XLSX 병합 머리 칸은 라벨로 쓰지 않는다(`# ponytail`). 후보는 사용자가 확인하는 초안이다. HWPX 는 본문 문단에 바로 든 표만 읽고(셀 안 표, 글상자, 머리글, 바닥글, 각주는 보지 않음, `# ponytail`), HWP 는 python-hwpx 가 HWPX 모델로 바꿔 열어 옮기지 못한 내용이 결과에서 빠질 수 있다(`meta.unconverted`). rhwp 렌더는 프로세스 안이라 시간 제한이 없다(`# ponytail`). 테스트의 HWPX, HWP 는 python-hwpx 로 만든 것이고 한/글로 만든 실제 공고 양식은 아직 확인하지 않았다. DOCX 의 중첩 표는 읽지 않고, 하이퍼링크 안의 run 은 치환하지 않는다(`# ponytail`). 채우기는 DOCX 머리글, 바닥글, 중첩 표, 하이퍼링크 안을 보지 않고(`# ponytail`), 그림이 든 run 에 토큰이 있으면 그 run 의 그림이 사라진다. XLSX 자리표시자는 수식 칸 안에서 바꾸지 않는다. anchor_text 는 본문 문단을 먼저, 그다음 표 칸마다 그 칸의 문단 안에서 처음 나온 기준 글만 쓴다. XLSX 는 openpyxl 이 차트와 그림을 저장하지 않는다(`# ponytail`). 테스트는 코드로 만든 작은 파일로 왕복하고, LibreOffice 렌더는 프로그램이 없는 경우만 검사한다(실제 렌더는 ash-mcp 컨테이너에서 수동 확인). rhwp 렌더는 테스트에서 실제로 PDF, PNG 를 만든다.
+**제약과 미구현**: PPTX 는 마스터와 레이아웃의 글을 읽지 않고(`# ponytail`), 노트와 차트 글은 읽기만 한다. 편집 계획이 읽기 전용 문단을 가리키면 `고칠 수 없는 대상(읽기 전용)` 문제로 막는다. PDF 는 본문을 고치지 않고 폼 필드만 채우며, 서명 필드와 값 없는 상위 노드는 kind other 로 싣는다(`# ponytail`). 채운 PDF 의 외형은 보는 프로그램이 다시 그리므로(`NeedAppearances`) pdftoppm 렌더에 값이 안 보일 수 있다. 그래서 쓰기 도구의 PDF 미리보기는 PDF 그대로 HUD 의 PDF 뷰어로 보낸다. 테스트의 PDF 는 pypdf 로 만든 작은 폼이고 실제 공문 PDF 양식은 아직 확인하지 않았다. `detect_fields` 는 규칙 기반이라 그림으로 본 검토는 하지 않는다. 빈 괄호는 바로 앞 낱말이 라벨이라 `(   )` 앞에 낱말이 없거나 숫자뿐이면 못 찾고, 체크 칸은 한 문단 안의 칸만 한 묶음으로 본다. 후보는 사용자가 확인하는 초안이다. HWPX 는 본문 문단에 바로 든 표만 읽고(셀 안 표, 글상자, 머리글, 바닥글, 각주는 보지 않음, `# ponytail`), HWP 는 python-hwpx 가 HWPX 모델로 바꿔 열어 옮기지 못한 내용이 결과에서 빠질 수 있다(`meta.unconverted`). rhwp 파싱은 프로세스 안이라 시간 제한이 없다(`# ponytail`). 리눅스에서 rhwp 가 직접 그리면 글꼴을 정확한 이름으로만 찾아 한글이 빠지고, rhwp 휠의 FreeType 에 `FT_Palette_Select` 가 없어 import 가 실패한다. ash-mcp 이미지는 휠의 FreeType 을 시스템 것으로 교체하고 `librsvg2-bin` 을 깐다(`mcp/Dockerfile`). 테스트의 HWPX, HWP 는 python-hwpx 로 만든 것이고 한/글로 만든 실제 공고 양식은 아직 확인하지 않았다. DOCX 의 중첩 표는 읽지 않고, 하이퍼링크 안의 run 은 치환하지 않는다(`# ponytail`). 채우기는 DOCX 머리글, 바닥글, 중첩 표, 하이퍼링크 안을 보지 않고(`# ponytail`), 그림이 든 run 에 토큰이 있으면 그 run 의 그림이 사라진다. XLSX 자리표시자는 수식 칸 안에서 바꾸지 않는다. anchor_text 는 본문 문단을 먼저, 그다음 표 칸마다 그 칸의 문단 안에서 처음 나온 기준 글만 쓴다. XLSX 는 openpyxl 이 차트와 그림을 저장하지 않는다(`# ponytail`). 테스트는 코드로 만든 작은 파일로 왕복하고, LibreOffice 렌더는 프로그램이 없는 경우만 검사한다(실제 렌더는 ash-mcp 컨테이너에서 수동 확인). rhwp 렌더는 테스트에서 실제로 PDF, PNG 를 만든다.
 
 ---
 
 ### docs_mcp: 행정문서 MCP 서버
 
-**설명**: 에이전트가 문서 폴더(`ASH_DOCS_DIR`, 기본 `~/Documents/ash`)의 행정문서를 docs MCP 서버의 도구로 읽고 고친다. 서버(`packages/docs_mcp`)는 `ash-mcp` 컨테이너에서 `docparse` 만 불러 돌고, 문서 폴더 밖 경로는 거부하며, 결과는 원본 옆 `<이름>.edited-<시각>.<확장자>` 로 저장해 원본을 덮어쓰지 않는다. 수정은 `plan_edit`(미리보기) 과 `apply_edit`(적용) 둘로 나뉘어 사용자가 바뀔 곳을 본 뒤 적용하고, `apply_edit` 는 MCP 정책의 쓰기 도구(ask)라 승인 모달을 거친다. 자주 쓰는 양식은 템플릿으로 등록해(`<문서 폴더>/.templates/<id>/` 에 스키마와 원본 사본) 값만 받아 `<이름>.filled-<시각>.<확장자>` 로 채운다. `register_template`, `fill_template` 도 쓰기 도구(ask)다.
+**설명**: 에이전트가 문서 폴더(`ASH_DOCS_DIR`, 기본 `~/Documents/ash`)의 행정문서를 docs MCP 서버의 도구로 읽고 고친다. 서버(`packages/docs_mcp`)는 `ash-mcp` 컨테이너에서 `docparse` 만 불러 돌고, 문서 폴더 밖 경로는 거부하며, 결과는 원본 옆 `<이름>.edited-<시각>.<확장자>` 로 저장해 원본을 덮어쓰지 않는다. 수정은 `plan_edit`(미리보기) 과 `apply_edit`(적용) 둘로 나뉘어 사용자가 바뀔 곳을 본 뒤 적용하고, `apply_edit` 는 MCP 정책의 쓰기 도구(ask)라 승인 모달을 거친다. 자주 쓰는 양식은 템플릿으로 등록해(`<문서 폴더>/.templates/<id>/` 에 스키마와 원본 사본) 값만 받아 `<이름>.filled-<시각>.<확장자>` 로 채운다. `register_template`, `fill_template` 도 쓰기 도구(ask)다. `create_document` 는 내용 명세로 새 DOCX, PPTX, XLSX 를 문서 폴더 안에 만들고, 역시 쓰기 도구(ask)다.
 
 **입력과 결과**
 
 | 입력 | 결과 |
 |---|---|
 | `list_documents(subdir)` | 폴더 안 DOCX, XLSX, HWPX, HWP, PPTX, PDF 목록(상대 경로, 크기, 수정 시각). 숨김 폴더(`.render`)는 뺀다 |
-| `inspect_document(path, include_empty)` | id 가 붙은 문단과 표 셀. 빈 문단은 기본으로 뺀다. 항목 2000개 넘으면 문단만 앞부분. PDF 는 `fields[{id, name, kind, value, page}]` 가 붙는다(폼 필드가 없는 문서는 키 없음) |
+| `inspect_document(path, include_empty, table, offset, limit)` | id 가 붙은 문단과 표 셀. 빈 문단은 기본으로 뺀다. 항목이 2000개를 넘으면 들어가는 표까지 싣고 나머지 표는 `tables_omitted[{id, name, rows, cols, cells_total}]` 와 `truncated` 로 알린다. `table`(표 id 나 시트 이름)을 주면 그 표의 셀만 `offset` 부터 `limit`(최대 2000)개, 더 있으면 `next_offset`. 없는 표는 `error`. PDF 는 `fields[{id, name, kind, value, page}]` 가 붙는다(폼 필드가 없는 문서는 키 없음). 읽기 전용 문단(PDF 글 줄, PPTX 노트와 차트)에는 `readonly: true`, 병합 칸에는 1보다 큰 `row_span`, `col_span` 이 붙는다. DOCX, HWPX 의 표에는 본문에서 그 앞에 오는 문단 수 `anchor` 가 붙는다 |
 | `plan_edit(path, replacements[{target, text}])` | `plan_id`, 바뀔 곳, 문제. 같은 원본 상태와 같은 계획이면 같은 `plan_id` |
 | `apply_edit(plan_id)` | 새 파일 경로와 검증 결과(`.hwp` 원본의 결과는 `.hwpx`). 문제가 있는 계획, 모르는 id, 계획 뒤 바뀐 원본은 `error`. 같은 `plan_id` 를 다시 부르면 처음 결과를 그대로 돌려준다 |
 | `render_document(path, html \| pdf \| png)` | html 은 본문 문자열, pdf 와 png 는 `.render/<이름>/` 아래 파일 경로. 백엔드가 png, pdf 결과를 문서 첨부(`kind: document`, `store: docs`, `pages`)로 만들어 HUD 문서 창에 띄운다 |
-| 사용자 "그 신청서 채워줘"(채우기 뒤) | 에이전트가 fill_template 이나 apply_edit 로 저장한 새 파일을 render_document(png)로 그려 HUD 문서 창에 쪽 그림을 띄운다 |
+| 사용자 "그 신청서 채워줘"(채우기 뒤) | fill_template, apply_edit, create_document 결과의 `preview`(저장한 파일의 png, PDF 원본은 pdf 렌더)가 HUD 문서 창에 바로 뜬다. 렌더가 실패해도 저장은 성공이고 `preview.error` 만 실린다 |
 | `list_templates()` | 등록된 템플릿마다 `template_id`, `format`, `kind`, `source`(등록한 원본의 상대 경로), `fields`(개수) |
 | `get_template_schema(template_id)` | 위 요약과 `fields[{name, type, required, max_chars, max_lines}]`. 로케이터는 싣지 않는다. 모르는 id 는 `error` |
-| `register_template(path, template_id, kind, fields)` | placeholder 는 `{{이름}}` 을 찾아 필드로(fields 는 type 등 덮기), blank_form 은 fields 에 locator 필수. 자리가 문서에 없으면 `error` 와 `issues`, 등록하지 않음. 결과는 요약, `registered`, `fields`. 같은 id 와 같은 원본을 다시 부르면 `registered: false` 로 있던 것을 돌려주고, 같은 id 에 원본이 다르면 새 버전 id 를 요구하는 `error` |
-| `detect_fields(path)` | `{template_id: 제안 id, format, candidates[{name, label, type, required, locator, rule, confidence}]}`. 아무것도 저장하지 않고 같은 파일이면 같은 결과. 후보의 name, type, required, locator 는 그대로 `register_template(kind=blank_form)` 의 fields 가 된다. 200개를 넘으면 앞 200개와 `truncated`. 경로 검사와 20MB 제한은 다른 도구와 같고 오류는 `error` |
-| `fill_template(template_id, values)` | 값 검사에 걸리면 `error` 와 `issues`(파일 없음). 통과하면 원본 자리 옆 `<이름>.filled-<시각>.<확장자>` 에 저장하고 `{template_id, fill_id, path, verify{ok, issues}}`. 검증이 실패해도 파일은 남기고 이유를 싣는다. 같은 템플릿과 같은 값이면 같은 `fill_id` 라 다시 불러도 처음 결과를 그대로 돌려주고 파일을 더 만들지 않는다. 같은 초에 다른 값으로 채워 이름이 겹치면 `-<fill_id>` 를 붙인다 |
+| `register_template(path, template_id, kind, fields)` | placeholder 는 `{{이름}}` 을 찾아 필드로(fields 는 type 등 덮기), blank_form 은 fields 에 locator 필수(choice 는 options 도). 자리가 문서에 없으면 `error` 와 `issues`, 등록하지 않음. 결과는 요약, `registered`, `fields`. 같은 id 와 같은 원본을 다시 부르면 `registered: false` 로 있던 것을 돌려주고, 같은 id 에 원본이 다르면 새 버전 id 를 요구하는 `error` |
+| `detect_fields(path)` | `{path, template_id: 제안 id, format, candidates[{name, label, type, required, locator, rule, confidence}]}`. 아무것도 저장하지 않고 같은 파일이면 같은 결과. 후보의 name, type, required, locator 는 그대로 `register_template(kind=blank_form)` 의 fields 가 된다. 200개를 넘으면 앞 200개와 `truncated`. 경로 검사와 20MB 제한은 다른 도구와 같고 오류는 `error` |
+| `make_placeholder_copy(path, fields)` | 빈 양식 옆에 `<이름>.template.<확장자>`(HWP 는 .hwpx) 사본을 만들고 fields 의 자리마다 `{{필드 이름}}` 을 넣어 `{source, path, placeholders, created, next, preview}`. 자리는 table_cell, anchor_text, sheet_cell, shape_text, inline_slot 만(checkbox, form_field 는 `error`). 자리가 문서에 없으면 `error` 와 `issues`. 같은 자리표시자를 가진 사본이 이미 있으면 다시 만들지 않고 `created: false`, 다른 사본이면 덮어쓰지 않고 `error`. 쓰기 도구(readOnlyHint 거짓) |
+| `fill_template(template_id, values)` | 값 검사에 걸리면 `error` 와 `issues`(파일 없음). 통과하면 원본 자리 옆 `<이름>.filled-<시각>.<확장자>` 에 저장하고 `{template_id, fill_id, path, verify{ok, issues}, preview}`. 검증이 실패해도 파일은 남기고 이유를 싣는다. 같은 템플릿과 같은 값이면 같은 `fill_id` 라 다시 불러도 처음 결과를 그대로 돌려주고 파일을 더 만들지 않는다. 같은 초에 다른 값으로 채워 이름이 겹치면 `-<fill_id>` 를 붙인다 |
+| `create_document(path, title, blocks, slides, sheets)` | 확장자로 형식을 정해 DOCX 는 `title`, `blocks[{type: heading \| paragraph \| bullets \| table, text, level, items, rows}]`, PPTX 는 `slides[{title, subtitle, bullets, table, notes}]`, XLSX 는 `sheets[{name, rows}]` 로 새 파일을 만들고 `{path, format, paragraphs, tables, slides, preview}`. 확장자와 칸이 맞지 않거나 빈 슬라이드, 겹치는 시트 이름이면 `error`(파일 없음). 이미 있는 파일은 덮어쓰지 않고 `error`. 같은 경로와 같은 내용으로 다시 부르면 처음 결과를 그대로 돌려준다(프로세스 메모리) |
+| 사용자 "발표 자료 PPTX 만들어줘" | Evi 가 구성을 보여 확인받고 create_document(승인)로 문서 폴더에 만들면 결과의 `preview` 가 HUD 문서 창에 뜬다 |
 | 사용자 "출장신청서 써줘. 12월 3일부터 5일까지" | 에이전트가 list_templates, get_template_schema 로 필드를 보고 빠진 필수 값을 묻고, 다 모이면 fill_template(승인) 결과의 경로와 검증을 전한다 |
-| 사용자 "이 빈 양식 등록해줘" | 에이전트가 detect_fields 후보를 한 줄씩(이름, 라벨, 형식, 위치) 보이고, 사용자가 빼거나 고쳐 확정한 목록으로만 register_template(blank_form, 승인) |
+| 사용자 "이 빈 양식 등록해줘" | 에이전트가 detect_fields 를 불러 화면에 양식 등록 창(`kind: form` 첨부)이 열리고 후보를 한 줄씩(이름, 라벨, 형식, 위치) 보인다. 창에서 고쳐 직접 등록하거나, 사용자가 빼거나 고쳐 확정한 목록으로만 register_template(blank_form, 승인) |
 | 사용자 "출장신청서 기간을 12월 3일에서 5일로 바꿔" | 에이전트가 inspect 로 id 를 고르고 plan_edit 결과를 "대상 id: 전 → 후" 로 보인 뒤, 사용자가 맞다고 하면 apply_edit |
 
 **처리 흐름**: `DocsPaths` 경로 검사, `docparse.inspect`, `preview` 로 `PlanStore` 에 계획 보관, 승인 뒤 `docparse.apply` 와 `verify_edit`, 결과 보관 순. 템플릿은 등록 때 `inspect`, 스키마 만들기, `check_locators`, `TemplateStore` 에 원본 사본과 `schema.json` 쓰기, 채울 때 `validate_values`, `fill_id` 로 기록 찾기, 없으면 원본 사본에 `docparse.fill`, `verify_fill`, `fills/<fill_id>.json` 쓰기 순. 파일은 임시 파일에 쓴 뒤 이름을 바꾼다. 20MB 넘는 파일은 열지 않는다.
@@ -429,16 +444,22 @@
 
 | 파일 | 층 | 역할 |
 |---|---|---|
-| `packages/docs_mcp/src/docs_mcp/docs_server.py` | api | MCPServer 와 도구 열 개(`DocsService`), 주석(readOnlyHint) |
+| `packages/docs_mcp/src/docs_mcp/docs_server.py` | api | MCPServer 와 도구 열두 개(`DocsService`), 주석(readOnlyHint) |
+| `packages/docparse/src/docparse/create/document_builder.py` | service | 내용 명세(`DocumentSpec`)로 새 DOCX, PPTX, XLSX 쓰기(숨김 임시 파일에 쓴 뒤 이름 바꾸기, 있는 파일 거절) |
 | `packages/docs_mcp/src/docs_mcp/docs_paths.py` | common | 문서 폴더 안 경로 검사(숨김 이름 거부), 결과, 렌더, 템플릿 자리, 목록 |
 | `packages/docs_mcp/src/docs_mcp/plan_store.py` | repository | 편집 계획 보관(원본 크기와 수정 시각으로 id) |
 | `packages/docs_mcp/src/docs_mcp/template_store.py` | repository | 템플릿 스키마, 원본 사본, 채우기 기록을 `.templates/` 에 파일로(원본 sha256, `fill_id`) |
 | `mcp/servers.yaml`, `mcp/Dockerfile` | mcp(컨테이너) | `docs` 항목(포트 8001), LibreOffice, poppler, 나눔 글꼴, workspace 설치 |
 | `docker-compose.yml` | infra | `ASH_DOCS_DIR` 를 ash-mcp 의 `/data/documents` 로, 백엔드에는 같은 폴더를 읽기 전용으로, 백엔드 `ASH_MCP_SERVERS` 에 docs |
 | `src/ash_industry/core/tools/mcp_loader.py` | core | 도구 주석을 와이어 이름(readOnlyHint)으로 넘긴다(mcp 2.x 모델은 snake_case). 서버별 첨부 규칙 `ARTIFACT_RULES`(media, docs) |
-| `src/ash_industry/core/tools/tool_artifacts.py` | core | `document_artifacts`: render_document 의 png, pdf 결과를 문서 첨부 하나로(`.render/` 아래 파일만, 60쪽까지, 순수) |
+| `src/ash_industry/core/tools/tool_artifacts.py` | core | `document_artifacts`: render_document 의 png, pdf 결과나 쓰기 도구의 `preview` 를 문서 첨부 하나로(`.render/` 아래 파일만, 60쪽까지, 순수) |
 | `src/ash_industry/ui/web/router/docs_router.py` | ui | `GET /api/docs/files/{path}`: 문서 폴더(`ASH_DOCS__DIR`) `.render/` 아래 png, pdf 만 |
-| `src/ash_industry/ui/web/static/app/media.js` | ui | 결과물 모달의 문서 보기(쪽 넘김, PDF 뷰어) |
+| `src/ash_industry/ui/web/static/app/media.js` | ui | 결과물 모달의 문서 보기(쪽 넘김, PDF 뷰어). 띄우고 닫을 때 `media:document` 이벤트로 원본 경로를 알린다 |
+| `src/ash_industry/app/docs_bridge.py` | service | HUD 가 에이전트 없이 docs MCP 도구를 부를 때 정책 판정(에이전트 이름 `hud`, ask 는 버튼 누름을 승인으로 보고 deny 만 막음), 호출(서버 시간 제한), 결과 기록, 결과 글을 dict 와 문서 첨부로 |
+| `src/ash_industry/ui/web/router/doc_edit_router.py` | ui | `GET /api/docs/structure`, `POST /api/docs/plan`, `POST /api/docs/apply`, `GET /api/docs/fields`, `POST /api/docs/templates`(입력은 pydantic 으로 먼저 검사) |
+| `src/ash_industry/ui/web/static/app/doc-edit.js` | ui | 문서 창의 `편집`(흰 종이 위에서 문단과 칸을 바로 고치는 에디터, 저장 한 번으로 미리보기와 적용) |
+| `src/ash_industry/ui/web/static/app/form-register.js` | ui | 양식 등록 창. `detect_fields` 결과로 열려 필드 후보를 고쳐 등록 |
+| `src/ash_industry/ui/web/static/app/doc-ui.js` | ui | 편집 보기와 양식 등록 창이 같이 쓰는 요소 만들기와 REST 호출 |
 
 **테스트**
 
@@ -446,8 +467,11 @@
 |---|---|
 | 단위 | `packages/docs_mcp/tests/test_docs_paths.py` |
 | 단위 | `packages/docs_mcp/tests/test_docs_server.py`(detect_fields 에서 등록과 채우기까지 DOCX, XLSX 와 HWPX 탐지, PPTX 와 PDF 목록, 폼 필드 채우기) |
+| 단위 | `tests/unit/test_doc_edit_docs_bridge.py`(hud 기록과 문서 첨부, 정책 deny 는 부르지 않음, 서버 없음, 시간 초과, 실패 기록, 결과 글 해석) |
+| 통합 | `tests/integ/test_doc_edit.py`(구조, 나눠 읽기, 미리보기, 적용 뒤 문서 첨부, 필드 후보, 등록 오류 422, 잘못된 입력은 부르기 전에 422, 서버 없으면 503) |
 | 단위 | `tests/unit/test_tools_tool_artifacts.py`(문서 첨부), `tests/unit/test_docs_docs_router.py`(렌더 파일만, 경로 탈출 404), `tests/unit/test_mcp_mcp_loader.py`(docs 서버 첨부) |
 | 단위 | `packages/docs_mcp/tests/test_template_store.py` |
+| 단위 | `packages/docparse/tests/test_document_builder.py`(형식별 만들고 다시 읽기, 맞지 않는 내용과 있는 파일 거절), `packages/docs_mcp/tests/test_docs_server.py`(create_document 한 번만 만들기, 경로 거절) |
 | 단위 | `tests/unit/test_mcp_mcp_loader.py`, `tests/unit/test_policy_mcp_policy.py`(주석 이름) |
 
 **보안**: 경로는 문서 폴더 안만(`..`, 절대 경로, `~`, `.` 으로 시작하는 이름 거부. `.templates`, `.render` 는 도구 경로로 열 수 없다). 템플릿 id 는 패턴(한글, 영문, 숫자, `-`, `_`)만 받아 폴더 밖을 가리키지 못한다. 채우는 값은 XLSX 에서 수식이 되지 않게 글로 저장한다. 문서 본문은 데이터이고 에이전트 지시문이 본문 속 지시를 따르지 않게 한다. 어느 에이전트가 docs 도구를 쓰는지는 MCP 정책 `agents.<id>.servers` 로 가른다(로컬 정책 파일). 호출 기록에는 인자가 60자까지 남으므로 개인정보가 든 긴 값은 잘린다.
@@ -501,7 +525,9 @@
 
 | 입력 | 결과 |
 |---|---|
-| `~/.ash/external_sources/*.yaml` | 소스별 주기 폴링, 이미 본 이벤트는 `~/.ash/external_seen.jsonl` 로 걸러 재발화 없음 |
+| `~/.ash/external_sources/*.yaml` | 소스별 주기 폴링, 이미 본 이벤트는 `~/.ash/external_seen.jsonl` 로 걸러 재발화 없음. 새 이벤트가 있으면 `[ExternalEventPoller] N new event(s)` 를 info 로 남긴다 |
+| JSON 이 아닌 글 목록(workspace-mcp 의 메일 검색, 일정 목록) | 메일은 `Message ID` 블록마다, 일정은 `ID:` 가 붙은 줄마다 이벤트 하나(키는 그 id, 제목은 Subject 나 일정 제목). 메일 제목은 `include_headers: true` 일 때만 실린다. `No messages found` 같은 빈 결과 안내는 이벤트가 아니다 |
+| 서버가 로그인 안내(`ACTION REQUIRED:`)를 결과로 돌려줌 | 이벤트를 만들지 않고 실패로 본다. 경고는 인증이 풀릴 때 한 번, 돌아올 때 한 번만 남긴다 |
 | 새 외부 이벤트 | 성찰 트리거가 깨어나고 세션이 inbox 를 한 번 비워 사고 요청에 싣는다. 사고가 실패했거나 게이트(쿨다운, 답 대기, 화면에 못 보냄)에 막혔거나 사고가 지난 말을 되풀이하면 inbox 앞에 되돌린다 |
 
 **처리 흐름**: `external_loader` 에서 `poller` 로, `mcp_source.poll`, `dedup`(틱 상한 안의 것만 본 것으로 적는다), `inbox` 적재, `ExternalTrigger` 깨우기, `AgentSession.reflect` 의 `_drain_external_events`, 말하지 못하면 `inbox.put_back` 순.
@@ -583,6 +609,7 @@
 | 입력 | 결과 |
 |---|---|
 | `/goal <문장>`, `goal` 도구(맡기기) | `~/.ash/goals/<id>.json` 저장, 스케줄 `goal-<목표 id>` 등록. 같은 목표는 하나 |
+| `goal` 도구(지우기, `action=delete`) | 목표 파일과 스케줄 `goal-<목표 id>`(저장 파일 포함)를 지운다. 진행 기록과 알린 항목도 사라져 다시 맡기면 처음부터다. 없으면 "맡은 목표 중에 없다" |
 | `/goal` | 목표 목록 |
 | `/goal stop <문장>` | 그 목표의 차례를 멈춘다 |
 | 차례마다 | 새로 알릴 항목이 있을 때만 ws `reminder{kind:"goal", label:"목표: ..."}` |
@@ -597,7 +624,7 @@
 | `src/ash_industry/core/goals/goals_store.py` | core | id 마다 JSON 파일 하나인 목표 저장소 |
 | `src/ash_industry/core/goals/goals_types.py` | core | 목표 모델, 자연 키, 답 해석, 알릴 항목 고르기 |
 | `src/ash_industry/core/goals/runner.py` | core | 목표 한 차례 실행 |
-| `src/ash_industry/core/goals/tool.py` | core | `goal` 도구(맡기기, 목록, 멈추기) |
+| `src/ash_industry/core/goals/tool.py` | core | `goal` 도구(맡기기, 목록, 멈추기, 지우기) |
 | `src/ash_industry/core/slash/goal_cmd.py` | core | `/goal` 핸들러 |
 
 **테스트**
@@ -752,7 +779,7 @@
 | 도구 종류 | 서버의 도구 주석(`readOnlyHint`, `destructiveHint`)으로, 없으면 이름 앞머리(`get_`, `list_`, `search_` ... 는 read, `send_`, `manage_`, `delete_` ... 는 write, 그 밖은 unknown)로 가른다 |
 | 호출 판정 순서 | 인자 고정 위반 → 도구 `deny` → 에이전트 제한 → 시간당 상한(기록의 지난 한 시간 allow, ask 수) → 도구 `mode` → 종류별 기본값. deny 는 묻지 않고 도구 결과에 이유를 적어 돌려준다(`policy` 판정). ask 는 승인 띠에 `google.send_gmail_message(to=…)` 와 이유를 보이고 "항상 허용"은 그 도구 전체(`*`)로 에이전트 승인 규칙에 남는다(인자 고정은 그 뒤에도 먼저 본다). allow 는 바로 실행 |
 | 스케줄, 목표 작업 | 같은 문을 쓴다. 물을 사람이 없어 ask 도구는 실행하지 않고 로그에 남긴다 |
-| `GET /api/mcp/policy`, `PUT /api/mcp/policy`, `GET /api/mcp/audit` | 정책 문서와 도구별 지금 판정, 정책 통째 교체(검증 뒤 파일에 쓰고 바로 적용), 최근 호출 기록(`docs/api_spec.md`) |
+| `GET /api/mcp/policy`, `PUT /api/mcp/policy`, `GET /api/mcp/audit` | 정책 문서와 도구별 지금 판정(`agent` 쿼리의 에이전트 기준, 기본 main), 정책 통째 교체(검증 뒤 파일에 쓰고 바로 적용), 최근 호출 기록(`docs/api_spec.md`) |
 | SET 화면 MCP 표 | 도구마다 모드, 시간당 상한, 인자 고정을 고치고 SAVE. 아래에 최근 호출 50건(`docs/view_spec.md`) |
 | `~/.ash/mcp_audit.jsonl`(`security.mcp_audit_path`) | 판정 줄(`call`: 시각, 에이전트, 서버, 도구, 판정, 이유, 인자 요약)과 결과 줄(`result`: 성공 여부, 오류 200자). 비밀값처럼 보이는 인자는 `***`. 최근 500줄을 메모리에 두고 파일은 1000줄에서 500줄로 다시 쓴다 |
 | HUD TOOLS 목록과 `/api/tools` 의 `approval` | MCP 도구는 정책 판정이 ask 일 때 🔒 |
@@ -1229,6 +1256,7 @@
 | 트리거 깨움 | ws `proactive_message{kind:"proactive"}`, 세션 기록에 assistant 메시지 |
 | 오래 걸리는 요청 | `turn_detach` 참고. 끝난 답은 `proactive_message{kind:"answer"}` |
 | 먼저 건넨 말 뒤의 첫 `user_message` | accept, dismiss, 약한 무시로 학습 |
+| 먼저 건넨 말에 답 없이 `ASH_PROACTIVE__AWAITING_EXPIRE_SEC`(기본 1800초) 경과 | 답 대기를 풀어 그 세션이 다시 먼저 말할 수 있다(그동안의 외부 이벤트가 막히지 않게) |
 | ws `proactive_feedback{id, accepted}` | 수락, 무시 학습(연결당 같은 `id` 한 번) |
 
 **처리 흐름**: `daemon` 이 `triggers` 를 기다려 `AgentSession.reflect` 로, `situation_facts` 가 약속과 외부 이벤트마다 남은 시간과 처리 신호를 계산해 요청에 붙이고, 성찰 사고, `ProactivityCore` 의 `policy` 게이팅, `_emit_proactive`, `feedback` 학습 순. `_emit_proactive` 가 답하는 중이나 Focus 중이라 🔔 를 버리면 `policy.withdraw` 가 쿨다운과 응답 대기를 통과 전으로 되돌려, 버린 말은 무시로 세지 않는다. 요청 시점에는 `ProactivityCore.plan_request` 가 사고가 미리 본 계획만 알려 주고, 실행은 `TurnDetach` 가 한다.
@@ -1831,8 +1859,8 @@
 | `src/ash_industry/core/tools/builtin/list_dir.py` | core | `list_dir` |
 | `src/ash_industry/core/tools/builtin/glob.py` | core | `glob` |
 | `src/ash_industry/core/tools/builtin/grep.py` | core | `grep` |
-| `src/ash_industry/core/tools/builtin/web_fetch.py` | core | `web_fetch` |
-| `src/ash_industry/core/tools/builtin/web_search.py` | core | `web_search`(Brave, 키 없으면 DuckDuckGo) |
+| `src/ash_industry/core/tools/builtin/web_fetch.py` | core | `web_fetch`(공개 주소만, 리다이렉트마다 사설, loopback, 링크 로컬 주소 차단, 10MB 상한, HTML 은 글로, PDF 는 앞 50쪽 글을 `[page N]` 과 함께, 첫 줄에 최종 URL) |
+| `src/ash_industry/core/tools/builtin/web_search.py` | core | `web_search`(Brave, 키 없으면 DuckDuckGo). `freshness`(day, week, month, year)로 기간을 걸고, 결과마다 `Source: <도메인>, <게시일>` |
 | `src/ash_industry/core/tools/tools_loader.py` | core | 파일 기반 도구 로딩 |
 | `src/ash_industry/ui/web/static/app/tools.js` | ui | SYSTEM 카드(SET 화면) 도구 목록 |
 | `scripts/experiments/gaia_bench.py` | scripts | GAIA 표본(레벨 비례 층화 40, seed), 웹 도구 실행기(사설 주소와 GAIA 사본 주소 차단, 검색 4 초 간격), 캐시, `run_vertex` |
@@ -1856,7 +1884,7 @@
 | 단위 | `tests/unit/test_scorecard_gaia.py` |
 | 통합 | `tests/integ/test_tools.py` |
 
-**제약과 미구현**: 사용자 도구 파일은 `plugin.watch_files` 가 켜져 있을 때 다시 읽는다(plugins 기능). 에이전트 정의의 `tools` 로 골라 복사한 레지스트리는 재시작해야 새 도구를 본다. GAIA 데이터는 Hugging Face `gaia-benchmark/GAIA` 의 `2023/validation/metadata.parquet`(접근 승인 필요)를 받아 `uvx --with pyarrow` 로 `~/.ash/benchmarks/gaia/validation.jsonl` 로 바꾼다. 데이터셋 조건(공개 웹에 다시 올리지 않기)에 따라 문항과 정답은 저장소, 문서, 로그에 남기지 않는다. DuckDuckGo 는 연속 검색 7 번쯤에서 막혀(202, 이어서 403) 검색을 한 줄로 세우고 4 초 간격을 둔다.
+**제약과 미구현**: 사용자 도구 파일은 `plugin.watch_files` 가 켜져 있을 때 다시 읽는다(plugins 기능). 에이전트 정의의 `tools` 로 골라 복사한 레지스트리는 재시작해야 새 도구를 본다. GAIA 데이터는 Hugging Face `gaia-benchmark/GAIA` 의 `2023/validation/metadata.parquet`(접근 승인 필요)를 받아 `uvx --with pyarrow` 로 `~/.ash/benchmarks/gaia/validation.jsonl` 로 바꾼다. 데이터셋 조건(공개 웹에 다시 올리지 않기)에 따라 문항과 정답은 저장소, 문서, 로그에 남기지 않는다. DuckDuckGo 는 연속 검색 7 번쯤에서 막혀(202, 이어서 403) 검색을 한 줄로 세우고 4 초 간격을 둔다. `web_fetch` 는 주소를 확인한 뒤 httpx 가 다시 DNS 를 조회해 DNS rebinding 은 막지 못한다(`# ponytail`). 컨테이너 안 서비스나 사설망 페이지는 web_fetch 로 읽을 수 없다.
 
 ---
 
@@ -2003,6 +2031,46 @@
 
 ---
 
+### upload: 채팅 첨부
+
+**설명**: HUD 입력 독에서 고른 파일을 `uploads/`(호스트 임시 폴더, 24시간 보관)에 내용 해시 이름으로 저장하고, 보낸 메시지 끝에 경로 안내를 붙여 에이전트가 문서 도구나 미디어 도구로 열게 한다. 이미지는 이번 턴 모델 호출에 그림으로도 붙는다.
+
+**입력과 결과**
+
+| 입력 | 결과 |
+|---|---|
+| 📎, 끌어다 놓기 | `POST /api/uploads` 로 `uploads/<sha256 12자>-<정리한 이름>` 에 저장. 50MB 까지, 형식 무관. 같은 내용은 파일 하나 |
+| 시간이 지남 | 마지막으로 올린 뒤 `ASH_DOCS__UPLOAD_TTL_HOURS`(기본 24)시간이 지난 첨부를 지운다. 백엔드 기동 때, 1시간마다, 업로드할 때 확인한다. 같은 파일을 다시 올리면 기한을 다시 센다. 지운 첨부의 id 로 보내면 그 첨부는 빠진다 |
+| `user_message{attachments:[id]}` | 메시지 끝에 `[첨부] <이름> | 경로 uploads/... (문서 폴더 기준) | <kind> | <크기>` 줄. 글 없이 첨부만 보내도 된다 |
+| 이미지(png, jpeg, webp, gif, 5MB 이하) | 이번 턴 모델 호출의 마지막 사용자 메시지에 그림으로 붙는다. 기록에는 글만 남는다 |
+
+**처리 흐름**: `attachments.js` 가 올리고 칩을 그린 뒤 `composer.js` 가 id 를 보낸다. `ws_router` 가 `UploadStore.find` 로 실제 파일만 골라 `describe` 글을 붙이고 이미지를 `ImageContent` 로 만들어 `run_prompt`, `AgentSession.prompt(images=)`, `AgentHarness.run(images=)` 의 `with_images` 로 넘긴다.
+
+**구현 파일**
+
+| 파일 | 층 | 역할 |
+|---|---|---|
+| `src/ash_industry/app/upload_store.py` | service | 이름 정리, 해시 이름 저장, id 로 찾기, 그림으로 넘길 이미지 |
+| `src/ash_industry/ui/web/router/upload_router.py` | ui | `POST /api/uploads`(받는 도중 50MB 넘으면 413) |
+| `src/ash_industry/ui/web/router/ws_router.py` | ui | `attachments_of`, `images_of`, 첨부 안내 붙이기 |
+| `src/ash_industry/agent_layer/harness.py` | agent | `with_images`: 마지막 사용자 메시지에 그림을 붙인 새 목록 |
+| `src/ash_industry/ui/web/static/app/attachments.js` | ui | 📎, 끌어다 놓기, 업로드, 칩 |
+| `src/ash_industry/ui/web/static/app/composer.js` | ui | 첨부와 함께 보내기, USER 말풍선의 `📎 이름` |
+| `src/ash_industry/ui/web/web_lifecycle.py` | ui | 기동 때와 1시간마다 `UploadStore.purge` |
+| `docker-compose.yml` | 설정 | 호스트 `ASH_UPLOAD_DIR`(기본 `/tmp/ash-uploads`)를 백엔드와 ash-mcp 의 `/data/documents/uploads` 에 마운트. 백엔드가 쓰는 곳은 이것뿐 |
+
+**테스트**
+
+| 종류 | 파일 |
+|---|---|
+| 단위 | `tests/unit/test_upload_upload_store.py` |
+| 단위 | `tests/unit/test_agent_loop_harness.py`(`with_images`) |
+| 통합 | `tests/integ/test_upload.py` |
+
+**제약과 미구현**: 대기열이나 뒤에서 도는 작업으로 간 말에는 그림이 빠지고 안내 줄만 간다(`# ponytail`). 24시간이 지나 지운 첨부는 대화 기록에 경로만 남아 에이전트가 다시 열지 못한다. 남겨야 할 파일은 에이전트에게 문서 폴더로 옮겨 달라고 한다(Evi 의 쓰기 도구). 호스트 `/tmp` 는 macOS 재시작 때도 비워질 수 있다. Ollama, vLLM 프로바이더는 그림을 버린다. 올린 파일 내용은 신뢰하지 않는 입력이다.
+
+---
+
 ### web_hud: Web HUD
 
 **설명**: FastAPI 앱이 정적 HUD 셸(리액터 캔버스, 입자 구, 카드, 입력 독)과 REST, WebSocket 라우터를 묶어 띄우고, 기동 때 첫 세션, 스케줄러, 성찰 daemon, 외부 폴러, 확장 파일 감시를 켠다.
@@ -2123,7 +2191,6 @@
 | `src/ash_industry/model_layer/providers/provider_base.py` | 프로바이더 기본 클래스 | agent_loop |
 | `src/ash_industry/model_layer/providers/anthropic.py` | Anthropic 스트리밍(프롬프트 캐싱) | agent_loop |
 | `src/ash_industry/model_layer/providers/openai.py` | OpenAI 스트리밍 | agent_loop |
-| `src/ash_industry/model_layer/providers/gemini.py` | Gemini 스트리밍 | agent_loop |
 | `src/ash_industry/model_layer/providers/ollama.py` | Ollama NDJSON 스트리밍. id 없이 온 도구 호출에는 `{이름}_{순번}` id 를 붙여, 같은 도구를 두 번 불러도 호출이 합쳐지지 않는다 | agent_loop |
 | `src/ash_industry/model_layer/providers/vllm.py` | vLLM SSE 스트리밍 | agent_loop |
 | `src/ash_industry/model_layer/embeddings.py` | 임베딩 프로바이더 | memory, openloop |

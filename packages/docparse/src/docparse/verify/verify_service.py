@@ -5,9 +5,10 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ConfigDict
 
 from docparse.template.template_schema import (
-    TableCellLocator, TemplateSchema, SheetCellLocator, ShapeTextLocator, FormFieldLocator, PlaceholderLocator,
-    render_value, validate_values,
+    CheckboxLocator, TableCellLocator, TemplateSchema, SheetCellLocator, ShapeTextLocator, FormFieldLocator,
+    InlineSlotLocator, PlaceholderLocator, render_value, validate_values,
 )
+from docparse.template.slot_text import BOX_CHECKED, box_positions
 from docparse.document_model import Document, cell_id
 from docparse.edit_plan import EditPlan
 
@@ -85,6 +86,12 @@ def verify_fill(after: Document, schema: TemplateSchema, values: Mapping[str, An
             found = "\n".join(t for i, t in texts.items() if i.startswith(prefix)) == expected
         elif isinstance(loc, FormFieldLocator):
             found = any(f.name == loc.name and f.value == expected for f in after.fields)
+        elif isinstance(loc, CheckboxLocator):
+            text = texts.get(loc.paragraph, "")
+            positions = box_positions(text, loc.options) or {}
+            found = {o for o, at in positions.items() if text[at] == BOX_CHECKED} == {expected}
+        elif isinstance(loc, InlineSlotLocator):
+            found = expected in texts.get(loc.paragraph, "")
         else:
             # 자리표시자와 기준 글 뒤는 문단 일부라 값이 들어 있는지만 본다
             found = any(expected in t for t in texts.values())

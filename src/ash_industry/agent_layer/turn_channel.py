@@ -43,7 +43,7 @@ class TurnChannel:
         self.detach_requested = asyncio.Event()
         # 뒤로 넘긴 뒤 이 작업에 보낸 말. 대화 중 대기열과 같은 자리(도구 결과 뒤)에서 꺼낸다
         self.background_inbox: TurnInbox | None = None
-        # 뒤로 넘긴 뒤에도 화면에 알릴 이벤트(그 작업에 보낸 말을 건넸다). 세션이 별 표시를 고친다
+        # 뒤로 넘긴 뒤에도 화면에 알릴 이벤트(그 작업에 보낸 말을 건넸다, 도구가 결과물을 만들었다)
         self.background_sink: AgentEventSink | None = None
 
     async def emit(self, event: AgentEvent) -> None:
@@ -59,7 +59,10 @@ class TurnChannel:
             if self._depth == 0:
                 self._ended = True
         if self.detached:
-            if isinstance(event, QueueDeliveredEvent) and self.background_sink is not None:
+            # 뗀 뒤에도 화면이 알아야 하는 것: 건넨 지시, 도구가 만든 결과물(문서 창, 플레이어)
+            delivered = isinstance(event, QueueDeliveredEvent)
+            produced = isinstance(event, ToolExecutionEndEvent) and event.artifacts and not event.is_error
+            if (delivered or produced) and self.background_sink is not None:
                 await self.background_sink(event)
             return
         if isinstance(event, MessageUpdateEvent) and event.text_delta:

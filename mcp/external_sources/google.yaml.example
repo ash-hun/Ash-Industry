@@ -4,7 +4,8 @@
 - name: gmail-unread
   server: google
   tool: search_gmail_messages
-  args: { query: "is:unread newer_than:1d", page_size: 10 }
+  # include_headers 를 켜야 메일마다 제목, 보낸 사람, 날짜가 실려 한 통이 이벤트 하나가 된다
+  args: { query: "is:unread newer_than:1d", page_size: 10, include_headers: true }
   interval_sec: 300
 # 특정 라벨의 새 메일만 보려면 query 에 라벨을 넣는다. 예: "label:중요 is:unread newer_than:1d"
 - name: calendar-upcoming

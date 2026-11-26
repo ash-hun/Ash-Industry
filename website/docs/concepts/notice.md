@@ -59,7 +59,7 @@ Ash Industry 는 원작자가 고안한 아래 구현 및 운영방침을 준수
 특정한 기능을 더하거나 구현을 바꿀 때는 기존 코드를 고치지 않고 붙일 수 있도록 설계하고, 변경가능한 지점을 경계로 나눈다. 또한, 에이전트의 확장을 적극 권장한다.
 
 - **층의 의존 방향을 한쪽으로 둔다**: `model_layer`(LLM 프로바이더, 스트림), `memory`, `agent_layer`(에이전트 루프, 사고), `core`(오케스트레이션, 정책, 도구) 순으로 위 층만 아래 층을 안다. `model_layer` 는 다른 층을 모르고, 사고 층은 벤더 스키마도 MCP 도 모른다. 그래서 한 층을 바꿔도 아래 층은 따라 바뀌지 않는다
-- **구현은 설정으로 고른다**: LLM 프로바이더(Anthropic, OpenAI, Gemini, Ollama, vLLM)는 레지스트리에 이름으로 등록하고 설정 값으로 고른다. 메모리(`in_memory`, `postgres`)와 세션 기록(`jsonl`, `postgres`)의 저장소도 설정으로 바꾼다
+- **구현은 설정으로 고른다**: LLM 프로바이더(Anthropic, OpenAI, Ollama, vLLM)는 레지스트리에 이름으로 등록하고 설정 값으로 고른다. 메모리(`in_memory`, `postgres`)와 세션 기록(`jsonl`, `postgres`)의 저장소도 설정으로 바꾼다
 - **기능은 정해진 지점에 끼운다**: 인증, 권한, 샌드박스는 프로토콜 뒤에 두고 구현을 갈아 끼운다. Focus 모드는 세션 루프를 고치지 않고 턴 앞뒤에 끼어드는 `TurnHook` 으로 붙였고, decision model 은 사고 엔진을 감싸는 래퍼(`DecisionGatedEngine`)로 붙였다
 - **코드를 고치지 않고 늘린다**: 팀 에이전트는 정의 파일 하나로 늘어나고, 그 에이전트만 쓸 도구와 명령은 확장 패키지(`~/.ash/extensions/`)로 붙인다. 스킬, 플러그인 훅, 사용자 도구는 `~/.ash/` 아래 디렉토리에 두면 기동 때 읽고, 외부 도구는 MCP 서버로 붙인다. 멀티 에이전트 오케스트레이션 패턴(Supervisor, Hierarchical, Market, Blackboard)과 패턴을 이어 붙이는 Pipeline 은 같은 프로토콜(`OrchestratorProtocol`)을 구현한다
 - **다시 실행하면 복구된다**: 셋업과 저장은 두 번 해도 한 번 한 것과 같게 만든다(`IF NOT EXISTS`, upsert, 자연 키). 중간에 죽어도 다시 실행하면 되므로, 운영 중에 사람이 상태를 손으로 맞출 일이 없다

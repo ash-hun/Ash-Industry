@@ -1,9 +1,19 @@
-"""[ui] Web HUD 기동과 종료: 첫 세션, 스케줄러, 성찰 daemon, 외부 이벤트 폴러, 확장 감시를 켜고 끄고 세션을 저장한다."""
+"""[ui] Web HUD 기동과 종료: 첫 세션, 스케줄러, daemon, 외부 폴러, 확장 감시, 첨부 정리를 켜고 끄고 세션을 저장한다."""
 
+import time
+import asyncio
+import contextlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 from collections.abc import Awaitable, Callable
 
+from ash_industry.app.upload_store import UploadStore
 from ash_industry.ui.web.web_state import WebState
+from ash_industry.common.logger import get_logger
+
+logger = get_logger(__name__)
+# 첨부 보관 기한을 이 주기로 확인한다. 기한(24시간)보다 짧으면 늦어도 이만큼만 더 남는다
+PURGE_INTERVAL_SEC = 3600.0
 
 if TYPE_CHECKING:
     from ash_industry.core.proactive import ProactivityDaemon
@@ -16,6 +26,7 @@ class WebLifecycle:
         self._state = state
         self._initial_session_id = initial_session_id
         self._daemon: ProactivityDaemon | None = None
+        self._purge_task: asyncio.Task[None] | None = None
         ctx = state.ctx
         if ctx.scheduler is not None:
             from ash_industry.core.notify import fan_out
@@ -42,6 +53,20 @@ class WebLifecycle:
             await ctx.external_poller.start()
         if ctx.extension_watcher is not None:
             await ctx.extension_watcher.start()
+        self._purge_task = asyncio.create_task(self._purge_uploads())
+
+    async def _purge_uploads(self) -> None:
+        """기동 때 한 번, 그 뒤 주기마다 보관 기한이 지난 첨부를 지운다."""
+        docs = self._state.settings.docs
+        store = UploadStore(Path(docs.dir))
+        while True:
+            try:
+                removed = store.purge(time.time(), docs.upload_ttl_hours * 3600)
+                if removed:
+                    logger.info(f"[Uploads] removed {len(removed)} expired attachment(s)")
+            except OSError as exc:
+                logger.warning(f"[Uploads] purge failed: {exc}")
+            await asyncio.sleep(PURGE_INTERVAL_SEC)
 
     async def _start_daemon(self) -> None:
         """성찰 daemon: 매 틱 활성 세션 전체를 성찰한다(멀티 세션 추종). 꺼져 있거나 이미 돌면 아무것도 안 한다."""
@@ -98,6 +123,10 @@ class WebLifecycle:
     async def stop(self) -> None:
         state, ctx = self._state, self._state.ctx
         await state.loop_lag.stop()
+        if self._purge_task is not None:
+            self._purge_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._purge_task
         await self._stop_daemon()
         if ctx.external_poller is not None:
             await ctx.external_poller.stop()

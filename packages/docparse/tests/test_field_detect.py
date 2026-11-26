@@ -2,9 +2,10 @@
 
 import unicodedata
 from pathlib import Path
+from openpyxl import Workbook
 from docx import Document as new_docx
 
-from docparse import Document, Paragraph, inspect, detect_fields, suggest_template_id
+from docparse import Document, FormField, Paragraph, inspect, detect_fields, suggest_template_id
 from docparse.template.field_detect import field_name, guess_type
 
 
@@ -98,6 +99,42 @@ def test_anchor_text_skips_unsafe_paragraphs() -> None:
 def test_sheet_right_blank_cell(xlsx_path: Path) -> None:
     assert _summary(inspect(xlsx_path)) == [
         ("금액", "number", {"kind": "sheet_cell", "sheet": "경비", "cell": "C1"}, "sheet_right", "high"),
+        ("비고", "long_text", {"kind": "sheet_cell", "sheet": "경비", "cell": "C5"}, "sheet_right", "high"),
+    ]
+
+
+def test_sheet_uses_blank_merge_and_skips_covered(tmp_path: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "신청"
+    ws["A1"] = "성명"
+    ws.merge_cells("B1:C1")
+    ws["A2"] = "주소"
+    ws["A3"] = "연락처"
+    ws.merge_cells("B2:B3")
+    ws["B2"] = 12345
+    path = tmp_path / "병합.xlsx"
+    wb.save(str(path))
+    assert [(c.name, c.locator.model_dump()) for c in detect_fields(inspect(path))] == [
+        ("성명", {"kind": "sheet_cell", "sheet": "신청", "cell": "B1"}),
+    ]
+
+
+def test_table_right_and_below_follow_merge_span(tmp_path: Path) -> None:
+    doc = new_docx()
+    table = doc.add_table(rows=3, cols=3)
+    table.cell(0, 0).merge(table.cell(0, 1)).text = "성명"
+    table.cell(1, 0).merge(table.cell(2, 0)).text = "주소"
+    table.cell(1, 1).text = "도로명"
+    table.cell(1, 2).text = "서울"
+    table.cell(2, 2).text = "확인"
+    path = tmp_path / "병합.docx"
+    doc.save(str(path))
+    cells = {c.id: c for c in inspect(path).tables[0].cells}
+    assert (cells["t0r0c0"].col_span, cells["t0r1c0"].row_span) == (2, 2)
+    assert [(c.name, c.locator.model_dump(), c.rule) for c in detect_fields(inspect(path))] == [
+        ("성명", {"kind": "table_cell", "table": 0, "row": 0, "col": 2}, "table_right"),
+        ("도로명", {"kind": "table_cell", "table": 0, "row": 2, "col": 1}, "table_below"),
     ]
 
 
@@ -128,3 +165,13 @@ def test_suggest_template_id() -> None:
     assert suggest_template_id("sub/출장 신청서(2026).docx") == "출장_신청서_2026-v1"
     assert suggest_template_id(unicodedata.normalize("NFD", "출장.hwpx")) == "출장-v1"
     assert suggest_template_id("ᄎ...hwpx") == "form-v1"
+
+
+def test_pdf_checkbox_becomes_choice_and_box_cell_is_not_label(tmp_path: Path) -> None:
+    pdf = Document(path="a.pdf", format="pdf", fields=(
+        FormField(id="f:agree", name="agree", value="", kind="checkbox", options=("/Yes", "/Off")),
+        FormField(id="f:sig", name="sig", value="", kind="checkbox"),
+    ))
+    assert [(c.name, c.type, c.options) for c in detect_fields(pdf)] == [("agree", "choice", ("/Yes", "/Off"))]
+    doc = _table_docx(tmp_path, [["□ 예 □ 아니오", ""]])
+    assert [c.rule for c in detect_fields(doc)] == ["checkbox"]

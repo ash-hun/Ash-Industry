@@ -23,7 +23,21 @@ def root(tmp_path: Path) -> Path:
     return docs
 
 
+class FakeRenderer:
+    """LibreOffice, pdftoppm 대신 빈 파일을 쓴다. 쓰기 도구의 미리보기 경로만 본다."""
+
+    def to_pdf(self, path: Path, out_dir: Path) -> Path:
+        target = out_dir / f"{path.stem}.pdf"
+        target.write_bytes(b"%PDF")
+        return target
+
+    def to_png(self, pdf: Path, out_dir: Path) -> list[Path]:
+        target = out_dir / f"{pdf.stem}-1.png"
+        target.write_bytes(b"png")
+        return [target]
+
+
 @pytest.fixture
 def service(root: Path) -> DocsService:
     clock = iter([datetime(2026, 11, 16, 9, 0, 0), datetime(2026, 11, 16, 9, 0, 1)])
-    return DocsService(DocsPaths(root), clock=lambda: next(clock))
+    return DocsService(DocsPaths(root), clock=lambda: next(clock), renderer=FakeRenderer())

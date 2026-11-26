@@ -146,7 +146,6 @@ export function handleMessage(msg, { replay = false } = {}) {
       const ok = !msg.is_error;
       const name = endToolTrace(msg.tool_call_id, ok);
       if (name && !replay) logActivity(`${ok ? '✓' : '✗'} ${name}`, ok ? 'ok' : 'err');
-      if (ok) onToolArtifacts(msg.artifacts);
       setStatus('THINKING', 'thinking');
       HUD.setState('thinking');
       break;
@@ -290,6 +289,16 @@ export function handleMessage(msg, { replay = false } = {}) {
 
     case 'queue_delivered':
       onQueueDelivered(msg.items);
+      break;
+
+    // 다른 세션의 먼저 건넨 말과 뒤에서 끝난 답(SessionRelay). 지금 보는 세션 것은 위 proactive_message 로 이미 왔다
+    case 'session_message':
+      if (!replay) window.dispatchEvent(new CustomEvent('ash:session-message', { detail: msg }));
+      break;
+
+    // 어느 세션, 어느 에이전트의 도구가 만든 결과물이든 열린 HUD 전부에 온다(SessionRelay). 같은 것은 서버가 한 번만
+    case 'artifacts_ready':
+      if (!replay) onToolArtifacts(msg.artifacts);
       break;
 
     // 빈 입력창에서 ↑ 로 되가져온 대기 말. 이 화면의 입력창으로

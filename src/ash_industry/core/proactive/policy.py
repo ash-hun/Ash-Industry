@@ -14,6 +14,9 @@ DEFAULT_FILLERS = (
 )
 # 먼저 건넨 말에 이만큼 답이 없으면 한 번만 약한 무시로 본다.
 DEFAULT_IGNORE_AFTER_SEC = 600
+# 답이 끝내 없으면 이만큼 지나 대기를 푼다. 그동안 들어온 메일, 일정 알림이 막히지 않게 한다
+# (2026-11-24 실측: 하루 넘게 막힘)
+DEFAULT_AWAITING_EXPIRE_SEC = 1800
 # 게이팅 없는 기본 정책이 침묵할 때 남기는 판정 근거
 SILENT_REASON = "proactivity disabled"
 
@@ -69,6 +72,7 @@ class DefaultProactivityPolicy(ProactivityPolicy):
         threshold_provider: Callable[[], float] | None = None,
         ignore_after_sec: int = DEFAULT_IGNORE_AFTER_SEC,
         cooldown_provider: Callable[[], int] | None = None,
+        awaiting_expire_sec: int = DEFAULT_AWAITING_EXPIRE_SEC,
     ) -> None:
         self._threshold = confidence_threshold
         # 동적 임계치(피드백 학습, C3). 없으면 고정 confidence_threshold 사용.
@@ -80,6 +84,7 @@ class DefaultProactivityPolicy(ProactivityPolicy):
         self._clock = clock
         self._last_spoke: dict[str, float] = {}
         self._ignore_after = ignore_after_sec
+        self._awaiting_expire = max(awaiting_expire_sec, ignore_after_sec)
         # 세션별 "답을 기다리는 발화" 시각과 무시로 이미 셌는지. 사용자가 무엇이든 보내면 지운다.
         # 재시작하면 세션이 저장된 🔔 로 restore_awaiting 을 불러 되살린다.
         self._awaiting: dict[str, tuple[float, bool]] = {}
@@ -110,12 +115,16 @@ class DefaultProactivityPolicy(ProactivityPolicy):
         """답을 기다리는 발화가 있으면 침묵 판정, 없으면 None.
 
         답 없이 ignore_after_sec 가 지나면 그 발화에 대해 딱 한 번 ignored=True 를 돌려준다.
+        awaiting_expire_sec 가 지나면 대기를 풀고 None 이다.
         """
         pending = self._awaiting.get(session_id)
         if pending is None:
             return None
         spoke_at, counted = pending
         t = self._clock() if now is None else now
+        if t - spoke_at >= self._awaiting_expire:
+            self._awaiting.pop(session_id, None)
+            return None
         ignored = not counted and (t - spoke_at) >= self._ignore_after
         if ignored:
             self._awaiting[session_id] = (spoke_at, True)

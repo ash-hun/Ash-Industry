@@ -73,13 +73,15 @@ class AssistantMessage(BaseModel):
 class Artifact(BaseModel):
     """도구가 만든 결과물 파일. 화면이 플레이어나 미리보기로 띄운다. path 는 그 저장소 기준 상대 경로."""
 
-    kind: Literal["video", "audio", "image", "file", "document"]
+    kind: Literal["video", "audio", "image", "file", "document", "form"]
     path: str
     title: str = ""
     # 어느 저장소의 파일인지. creative 는 /api/creative/files/<path>, docs 는 /api/docs/files/<path> 로 받는다
     store: str = "creative"
     # document 의 쪽 그림(png)이나 PDF 하나. path 는 그 첫 항목이다
     pages: list[str] = Field(default_factory=list)
+    # document 가 그린 원본 문서나 form 의 빈 양식(문서 폴더 기준). 화면의 편집 보기와 양식 등록 창이 이 문서를 연다
+    source: str = ""
 
 
 class ToolResultMessage(BaseModel):

@@ -17,7 +17,7 @@ import { setWakeEnabled } from './wake.js';
 import { handleMessage, resetAgentStack, resetBackgroundThought } from './events.js';
 import { setReplyClassifier } from './reply.js';
 import { applyBrand, AGENT_ID } from './brand.js';
-import { renderAgentNav, setAgentSwitcher } from './agent-nav.js';
+import { renderAgentNav, setAgentSwitcher, setUnreadAgents } from './agent-nav.js';
 import { loadAgents, agentById, isTeam, setActiveAgents } from './agents.js';
 import { setApprovalWaiting } from './approval-wait.js';
 import { setBackgroundTasks } from './task-stars.js';
@@ -44,17 +44,25 @@ let _held = null;
 let _historyDone = Promise.resolve();
 // connect 를 부를 때마다 하나씩 는다. 같은 세션에 다시 붙어도 앞 연결의 재생이 새 연결을 건드리지 않게 가른다
 let _linkGen = 0;
+// 보고 있지 않을 때 먼저 건넨 말이나 뒤에서 끝난 답이 온 세션. 그 세션에 붙으면 지운다
+const _unread = new Set();
+let _lastSessions = [];
+
+function unreadAgents() {
+  return [..._unread].map((sid) => _sessionAgents[sid] || 'main');
+}
 
 // SESSIONS 는 지금 보는 에이전트의 세션만. 다른 에이전트의 세션은 그 에이전트로 넘어가면 보인다
 function renderSessions(sessions, sessionAgents) {
   if (sessionAgents) _sessionAgents = sessionAgents;
+  _lastSessions = sessions;
   const shown = sessions.filter((sid) => sid === _currentSessionId || (_sessionAgents[sid] || 'main') === AGENT_ID);
   $list.innerHTML = '';
   $count.textContent = String(shown.length).padStart(2, '0');
   for (const sid of shown) {
     const isActive = sid === _currentSessionId;
     const div = document.createElement('div');
-    div.className = `session${isActive ? ' active' : ''}`;
+    div.className = `session${isActive ? ' active' : ''}${_unread.has(sid) ? ' unread' : ''}`;
     // 세션 앞 표식은 그 세션 에이전트의 색
     const agent = agentById(_sessionAgents[sid] || 'main');
     if (agent && isTeam()) {
@@ -101,6 +109,21 @@ window.addEventListener('ash:activity', async () => {
   } catch { /* 목록은 다음 접속 때 맞춰진다 */ }
 });
 
+// 다른 세션에 말이 왔다(먼저 건넨 말, 뒤에서 끝난 답). 대화는 그 세션 기록에 남아 있어 옮겨 가면 보인다.
+// 여기서는 놓치지 않게 알리기만 한다: 어느 화면에서나 보이는 활동 줄, 세션 목록과 에이전트 화살표의 점
+window.addEventListener('ash:session-message', (e) => {
+  const msg = e.detail || {};
+  const sid = msg.session_id;
+  if (!sid || sid === _currentSessionId) return;
+  if (msg.agent) _sessionAgents[sid] = msg.agent;
+  _unread.add(sid);
+  const name = agentById(msg.agent || 'main')?.name || msg.agent || sid;
+  const text = (msg.text || '').trim().split('\n')[0];
+  logActivity(`🔔 ${name} · ${text}`, 'proactive', SYSTEM);
+  setUnreadAgents(unreadAgents());
+  renderSessions(_lastSessions.includes(sid) ? _lastSessions : [..._lastSessions, sid]);
+});
+
 // 새 세션은 지금 보고 있는 에이전트의 것
 async function createSession(agentId) {
   const res = await apiFetch('/api/sessions', {
@@ -120,12 +143,13 @@ document.getElementById('new-session-btn').addEventListener('click', async () =>
 // 에이전트끼리의 대화 세션(peer-부른쪽-받는쪽). 사용자가 직접 말을 거는 세션이 아니다
 const PEER_PREFIX = 'peer-';
 
-// 에이전트 전환: 그 에이전트의 열린 세션(대화 세션 제외)이 있으면 가장 위의 것으로, 없으면 새로 만든다.
+// 에이전트 전환: 그 에이전트의 열린 세션(대화 세션 제외)이 있으면 안 읽은 것, 없으면 가장 위의 것으로, 없으면 새로 만든다.
 // 옮겼으면 true. 구체 밀기 애니메이션(agent-nav.js)이 옮기지 못한 경우를 되돌린다
 async function switchAgent(agentId) {
   if (agentId === AGENT_ID) return false;
-  const sid = Object.keys(_sessionAgents)
-    .find((s) => _sessionAgents[s] === agentId && !s.startsWith(PEER_PREFIX)) || await createSession(agentId);
+  // 안 읽은 말이 온 세션이 있으면 그쪽으로 간다
+  const own = Object.keys(_sessionAgents).filter((s) => _sessionAgents[s] === agentId && !s.startsWith(PEER_PREFIX));
+  const sid = own.find((s) => _unread.has(s)) || own[0] || await createSession(agentId);
   if (!sid) return false;
   connect(sid);
   return true;
@@ -219,6 +243,8 @@ async function replayInFlight(gen, events) {
 
 export function connect(sessionId = _currentSessionId) {
   _currentSessionId = sessionId;
+  _unread.delete(sessionId);
+  setUnreadAgents(unreadAgents());
   // 지금 세션을 다른 모듈(workflow 의 지도)이 import 없이 읽고, 바뀜을 듣는다
   document.body.dataset.session = sessionId;
   document.dispatchEvent(new CustomEvent('session:connected', { detail: sessionId }));

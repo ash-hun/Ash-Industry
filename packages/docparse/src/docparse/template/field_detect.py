@@ -8,13 +8,14 @@ from pydantic import BaseModel, ConfigDict
 from openpyxl.utils import get_column_letter
 
 from docparse.template.template_schema import (
-    TEMPLATE_ID, Locator, FieldType, TEXT_FORMATS, TemplateField, FormFieldLocator, SheetCellLocator,
-    TableCellLocator, AnchorTextLocator,
+    TEMPLATE_ID, Locator, FieldType, TEXT_FORMATS, TemplateField, CheckboxLocator, FormFieldLocator, SheetCellLocator,
+    TableCellLocator, InlineSlotLocator, AnchorTextLocator,
 )
-from docparse.document_model import Cell, Document, Table
+from docparse.template.slot_text import BOXES, box_options, slot_labels
+from docparse.document_model import Cell, Document, Paragraph, Table
 
 Confidence = Literal["high", "low"]
-Rule = Literal["table_right", "table_below", "anchor_text", "sheet_right", "form_field"]
+Rule = Literal["table_right", "table_below", "anchor_text", "sheet_right", "form_field", "inline_slot", "checkbox"]
 
 SHORT_LABEL = 20
 NAME_MAX = 60
@@ -39,12 +40,15 @@ class FieldCandidate(BaseModel):
     label: str
     type: FieldType = "text"
     required: bool = True
+    options: tuple[str, ...] = ()
     locator: Locator
     rule: Rule
     confidence: Confidence
 
     def to_field(self) -> TemplateField:
-        return TemplateField(name=self.name, type=self.type, required=self.required, locator=self.locator)
+        return TemplateField(
+            name=self.name, type=self.type, required=self.required, options=self.options, locator=self.locator,
+        )
 
 
 def guess_type(label: str) -> FieldType:
@@ -75,8 +79,12 @@ def _blank(cell: Cell) -> bool:
 
 
 def _is_label(text: str) -> bool:
+    """체크 칸이 든 글은 라벨이 아니라 채울 자리다."""
     stripped = text.strip()
-    return bool(stripped) and "{{" not in stripped and any(ch.isalpha() for ch in stripped)
+    return (
+        bool(stripped) and "{{" not in stripped and not any(b in stripped for b in BOXES)
+        and any(ch.isalpha() for ch in stripped)
+    )
 
 
 def _confidence(label: str) -> Confidence:
@@ -89,8 +97,8 @@ def _clean_label(text: str) -> str:
 
 
 def _right_neighbor(row_cells: list[Cell], cell: Cell) -> Cell | None:
-    # ponytail: 병합 폭을 몰라 같은 행의 다음 칸을 오른쪽 칸으로 본다(세로 병합에 약함), 걸리면 Cell 에 span
-    return next((c for c in row_cells if c.col > cell.col), None)
+    """병합 폭 바로 다음 열에서 시작하는 칸. 그 자리가 위에서 내려온 세로 병합에 덮였으면 없다."""
+    return next((c for c in row_cells if c.col == cell.col + cell.col_span), None)
 
 
 def _table_candidates(table: Table) -> list[FieldCandidate]:
@@ -112,7 +120,7 @@ def _table_candidates(table: Table) -> list[FieldCandidate]:
             # 오른쪽이 자리표시자면 그 칸이 이미 채울 자리다
             if neighbor is not None and "{{" in neighbor.text:
                 continue
-            under = grid.get((cell.row + 1, cell.col))
+            under = grid.get((cell.row + cell.row_span, cell.col))
             if under is not None and _blank(under):
                 below.append((under, label))
     out: list[FieldCandidate] = []
@@ -159,18 +167,31 @@ def _anchor_candidates(document: Document) -> list[FieldCandidate]:
     return out
 
 
+def _covered(table: Table) -> set[tuple[int, int]]:
+    """병합 범위 안에서 왼쪽 위 칸을 뺀 자리. 이 자리는 값을 쓸 수 없다."""
+    out: set[tuple[int, int]] = set()
+    for c in table.cells:
+        out.update(
+            (r, k) for r in range(c.row, c.row + c.row_span) for k in range(c.col, c.col + c.col_span)
+            if (r, k) != (c.row, c.col)
+        )
+    return out
+
+
 def _sheet_candidates(table: Table) -> list[FieldCandidate]:
-    filled = {(c.row, c.col) for c in table.cells}
+    by_pos = {(c.row, c.col): c for c in table.cells}
+    covered = _covered(table)
     out: list[FieldCandidate] = []
     for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
-        # 병합 머리 칸은 범위 폭을 IR 이 몰라 오른쪽 칸이 병합 안일 수 있다
-        # ponytail: 병합 라벨은 건너뛰고 병합 안 빈 칸은 못 가린다, 걸리면 Cell 에 span
-        if cell.merged or cell.text.startswith("=") or not _is_label(cell.text):
+        if cell.text.startswith("=") or not _is_label(cell.text):
             continue
-        if (cell.row, cell.col + 1) in filled:
+        target = (cell.row, cell.col + cell.col_span)
+        # 오른쪽이 비었거나 빈 병합 범위의 왼쪽 위 칸이어야 한다
+        right = by_pos.get(target)
+        if target in covered or (right is not None and right.text.strip()):
             continue
         label = _clean_label(cell.text)
-        address = f"{get_column_letter(cell.col + 2)}{cell.row + 1}"
+        address = f"{get_column_letter(target[1] + 1)}{cell.row + 1}"
         out.append(FieldCandidate(
             name=field_name(label), label=label, type=guess_type(label),
             locator=SheetCellLocator(sheet=table.name, cell=address), rule="sheet_right",
@@ -180,17 +201,59 @@ def _sheet_candidates(table: Table) -> list[FieldCandidate]:
 
 
 def _form_candidates(document: Document) -> list[FieldCandidate]:
-    """PDF 폼 필드는 이미 채울 자리다. 글과 선택 칸만 싣고 이름을 라벨로 쓴다. 필드 이름은 만든 사람이 붙였다."""
+    """PDF 폼 필드는 이미 채울 자리다. 이름을 라벨로 쓴다. 필드 이름은 만든 사람이 붙였다.
+    체크박스와 선택지가 있는 선택 필드는 choice 이고 값은 options 중 하나다."""
     out: list[FieldCandidate] = []
     for item in document.fields:
-        if item.kind not in ("text", "choice"):
+        if item.kind not in ("text", "choice", "checkbox"):
+            continue
+        if item.kind == "checkbox" and not item.options:
             continue
         label = item.name.rsplit(".", 1)[-1]
+        options = item.options if item.kind != "text" else ()
         out.append(FieldCandidate(
-            name=field_name(label), label=label, type=guess_type(label), required=False,
-            locator=FormFieldLocator(name=item.name), rule="form_field", confidence="high",
+            name=field_name(label), label=label, type="choice" if options else guess_type(label), required=False,
+            options=options, locator=FormFieldLocator(name=item.name), rule="form_field", confidence="high",
         ))
     return out
+
+
+def _scoped_paragraphs(document: Document) -> list[tuple[Paragraph, str]]:
+    """본문 문단과 표 칸 안 문단. 칸 안 문단에는 바로 왼쪽 칸의 글을 곁들인다(체크 칸 라벨이 거기 있는 양식)."""
+    out: list[tuple[Paragraph, str]] = [(p, "") for p in document.paragraphs]
+    for table in document.tables:
+        left_of = {(c.row, c.col + c.col_span): c for c in table.cells}
+        for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
+            left = left_of.get((cell.row, cell.col))
+            context = _clean_label(left.text) if left is not None and _is_label(left.text) else ""
+            out.extend((p, context) for p in cell.paragraphs)
+    return out
+
+
+def _inline_candidates(document: Document) -> list[FieldCandidate]:
+    """`성명(    )` 같은 빈 괄호마다 inline_slot, `□ 예 □ 아니오` 같은 칸 묶음마다 checkbox 후보."""
+    slots: list[FieldCandidate] = []
+    boxes: list[FieldCandidate] = []
+    for para, context in _scoped_paragraphs(document):
+        if "{{" in para.text:
+            continue
+        for label in slot_labels(para.text):
+            slots.append(FieldCandidate(
+                name=field_name(label), label=label, type=guess_type(label),
+                locator=InlineSlotLocator(paragraph=para.id, label=label), rule="inline_slot",
+                confidence=_confidence(label),
+            ))
+        options = tuple(box_options(para.text))
+        if not options:
+            continue
+        head = _clean_label(para.text[: min(para.text.index(b) for b in BOXES if b in para.text)])
+        label = head or context or "선택"
+        boxes.append(FieldCandidate(
+            name=field_name(label), label=label, type="choice", required=len(options) > 1, options=options,
+            locator=CheckboxLocator(paragraph=para.id, options=options), rule="checkbox",
+            confidence=_confidence(label) if (head or context) else "low",
+        ))
+    return slots + boxes
 
 
 def _dedupe_names(candidates: list[FieldCandidate]) -> list[FieldCandidate]:
@@ -208,7 +271,7 @@ def _dedupe_names(candidates: list[FieldCandidate]) -> list[FieldCandidate]:
 
 
 def detect_fields(document: Document) -> list[FieldCandidate]:
-    """본문 기준 글, 표(오른쪽 빈 칸, 아래 빈 칸), XLSX 시트(오른쪽 빈 칸), PDF 폼 필드 순.
+    """본문 기준 글, 표(오른쪽 빈 칸, 아래 빈 칸), 빈 괄호, 체크 칸, XLSX 시트(오른쪽 빈 칸), PDF 폼 필드 순.
     PPTX 는 표만 본다. 같은 문서면 같은 목록과 순서."""
     candidates: list[FieldCandidate] = []
     if document.format == "pdf":
@@ -223,4 +286,5 @@ def detect_fields(document: Document) -> list[FieldCandidate]:
         candidates.extend(_anchor_candidates(document))
         for table in document.tables:
             candidates.extend(_table_candidates(table))
+        candidates.extend(_inline_candidates(document))
     return _dedupe_names(candidates)

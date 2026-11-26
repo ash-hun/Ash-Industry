@@ -8,9 +8,12 @@ from collections.abc import AsyncIterator
 from ash_industry.agent_layer.agent_types import AgentEndEvent, BackgroundTaskEvent, ProactiveMessageEvent
 from ash_industry.model_layer.model_types import AssistantMessage, LLMContext, ModelConfig, UserMessage
 from tests.fixtures.web_hud_helpers import scripted_env, use_provider, web_assembly, web_client
-from tests.fixtures.agent_loop_helpers import ScriptedProvider, register, text_turn
+from tests.fixtures.agent_loop_helpers import ScriptedProvider, register, text_turn, tool_turn
+from ash_industry.model_layer.model_types import Artifact, TextContent, ToolResultMessage
 from ash_industry.model_layer.model_types import StreamEvent, StreamOptions
+from ash_industry.core.tools.tools_registry import AshTool, ToolContext
 from ash_industry.agent_layer.thought.ack_writer import FALLBACK_ACK
+from ash_industry.agent_layer.agent_types import ArtifactsEvent
 from ash_industry.core.turn import DetachSettings, TurnDetach
 from ash_industry.core.session import AgentSession
 
@@ -34,6 +37,21 @@ class GatedProvider(ScriptedProvider):
             await self.gate.wait()
         for event in self._turns[min(index, len(self._turns) - 1)]:
             yield event
+
+
+class _Render(AshTool):
+    """문서를 그려 첨부 하나를 돌려주는 도구. 맡긴 에이전트가 렌더한 결과를 흉내 낸다."""
+
+    name = "render_document"
+    description = "x"
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, tool_call_id: str, params: dict[str, Any], signal: asyncio.Event | None = None,
+                      context: ToolContext | None = None) -> ToolResultMessage:
+        result = ToolResultMessage(tool_call_id=tool_call_id, tool_name=self.name, content=[TextContent(text="ok")])
+        page = ".render/a/a-1.png"
+        result.artifacts = [Artifact(kind="document", path=page, store="docs", pages=[page])]
+        return result
 
 
 class _Writer:
@@ -84,6 +102,8 @@ async def test_long_turn_acks_frees_session_and_delivers_answer(
     ends = [e for e in events if isinstance(e, AgentEndEvent)]
     assert len(ends) == 1 and ends[0].final_message.text() == ACK
     assert not session.is_running
+    # 선응답은 이미 한 말이다. 성찰이 같은 말을 먼저 건넬 거리로 다시 고르면 막힌다
+    assert ACK in session._recent_proactive
 
     # 뒤에서 도는 동안 같은 에이전트와 계속 말한다
     reply = await asyncio.wait_for(session.prompt("트랜스포머가 뭐야?", detach=True), 2)
@@ -169,3 +189,28 @@ def test_hud_gets_ack_star_and_answer(monkeypatch, tmp_path) -> None:
     assert [(t["session_id"], t["agent"]) for t in started["tasks"]] == [("alpha", "main")]
     assert (answer["kind"], answer["text"]) == ("answer", "영상 완성")
     assert finished["tasks"] == [] and finished["done"]["ok"] is True
+
+
+async def test_detached_turn_sends_tool_artifacts_to_screen(
+    permissive_pipeline, plugin_runner, session_memory, tool_registry, skill_registry, jsonl_repo
+) -> None:
+    fx = {"pipeline": permissive_pipeline, "plugin_runner": plugin_runner, "memory": session_memory,
+          "tools": tool_registry, "skills": skill_registry, "repo": jsonl_repo}
+    tool_registry.register(_Render())
+    await jsonl_repo.create(session_id=SID)
+    provider = GatedProvider([tool_turn(("c1", "render_document", {})), text_turn("문서를 띄웠어요")])
+    session = _session(provider, fx)
+    events: list[Any] = []
+
+    async def sink(event: Any) -> None:
+        events.append(event)
+
+    session.subscribe(sink)
+    acked = await asyncio.wait_for(session.prompt("발표 자료 만들어줘", detach=True), 2)
+    assert acked is not None and acked.text() == ACK
+
+    provider.gate.set()
+    await _until(lambda: any(isinstance(e, ProactiveMessageEvent) and e.kind == "answer" for e in events))
+    shown = [e for e in events if isinstance(e, ArtifactsEvent)]
+    assert len(shown) == 1 and shown[0].session_id == SID and shown[0].tool_name == "render_document"
+    assert [a.pages for a in shown[0].artifacts] == [[".render/a/a-1.png"]]

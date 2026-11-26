@@ -287,6 +287,13 @@ class SchedulerService:
                 logger.info(f"[Scheduler] Cron parse error for '{task.name}': {exc}")
                 continue
             if self._due(task.name, prev, now_dt):
+                late = (now_dt - prev).total_seconds()
+                if late >= 60:
+                    # 절전에서 깨어나 지난 슬롯을 늦게 돌린다. 사이에 버린 슬롯이 있었는지 로그로만 알 수 있다
+                    logger.info(
+                        f"[Scheduler] '{task.name}' catching up slot {prev.isoformat()} late={late:.0f}s"
+                        f" last={self._last_run[task.name].isoformat()}"
+                    )
                 self._last_run[task.name] = prev
                 fired.append(self._spawn(self._run_and_deliver(task)))
         return fired
@@ -310,6 +317,14 @@ class SchedulerService:
         t.add_done_callback(self._bg.discard)
         t.add_done_callback(self._on_task_done)
         return t
+
+    def remove_task(self, name: str) -> bool:
+        """작업을 목록과 저장 파일에서 내린다. 없는 이름이면 False. 두 번 불러도 작업은 없다."""
+        task = self.get_task(name)
+        if task is None:
+            return False
+        self._retire(task)
+        return True
 
     def _retire(self, task: ScheduledTask) -> None:
         """한 번 실행 작업을 목록과 저장 파일에서 내린다(두 번 울리지 않게 실행 전에)."""

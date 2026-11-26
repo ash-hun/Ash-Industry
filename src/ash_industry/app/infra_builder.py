@@ -73,6 +73,7 @@ class InfraBuilder:
 
         from ash_industry.core.policy.authenticator import NoAuthAuthenticator
         from ash_industry.core.policy.validator import DefaultInputValidator
+        from ash_industry.core.policy.auto_approve import AutoApproveStore
         from ash_industry.core.policy.approval_rules import ApprovalRules
         from ash_industry.core.policy.pipeline import SecurityPipeline
         from ash_industry.core.policy.sandbox import DefaultSandbox
@@ -128,6 +129,7 @@ class InfraBuilder:
             agent_tools=extensions.agent_tools,
             extension_commands=extensions.commands,
             mcp_gate=self._mcp_gate,
+            auto_approve=AutoApproveStore(settings.security.auto_approve_path),
         )
         user_model_store = (
             self.build_user_model_store() if settings.thought.enabled and settings.user_model.enabled else None

@@ -112,3 +112,24 @@ def test_check_locators_ok_and_reports_missing(form_docx_path: Path) -> None:
     assert check_locators(bad, doc) == [
         "a: 표 칸이 없다 t0r5c0", "b: 기준 글이 없다 '주소:'", "c: sheet_cell 은 XLSX 만",
     ]
+
+
+def test_choice_field_takes_checkbox_options_and_checks_value() -> None:
+    box = {"kind": "checkbox", "paragraph": "p1", "options": ["예", "아니오"]}
+    field = TemplateField.model_validate({"name": "여부", "type": "choice", "locator": box})
+    assert field.options == ("예", "아니오")
+    schema = _schema(fields=[{"name": "여부", "type": "choice", "locator": box}])
+    assert validate_values(schema, {"여부": "예"}) == []
+    assert validate_values(schema, {"여부": "모름"}) == ["여부: 선택지 중 하나(예, 아니오)"]
+
+
+@pytest.mark.parametrize("field", [
+    {"name": "a", "type": "text", "locator": {"kind": "checkbox", "paragraph": "p0", "options": ["예"]}},
+    {"name": "a", "type": "choice", "locator": {"kind": "anchor_text", "after": "성명:"}},
+    {"name": "a", "type": "choice", "options": ["모름"],
+     "locator": {"kind": "checkbox", "paragraph": "p0", "options": ["예"]}},
+    {"name": "a", "locator": {"kind": "inline_slot", "paragraph": "x1", "label": "성명"}},
+])
+def test_choice_and_inline_locators_reject_bad_shapes(field: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        TemplateField.model_validate(field)

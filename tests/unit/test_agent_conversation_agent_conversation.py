@@ -15,7 +15,8 @@ from ash_industry.app.agent_conversation import (
     peer_session_id,
     refusal,
 )
-from ash_industry.model_layer.model_types import AssistantMessage, TextContent, Usage
+from ash_industry.model_layer.model_types import Artifact, AssistantMessage, TextContent, Usage
+from ash_industry.core.tools.tool_artifacts import peer_artifacts, collect_peer_artifacts
 from ash_industry.core.tools.tools_registry import ToolContext
 from ash_industry.core.session import SessionBusy
 from ash_industry.memory.scope import MemoryScope
@@ -150,3 +151,39 @@ async def test_receiver_sees_the_request_it_got():
     tool = AskAgentTool(_agents(), AsyncMock(return_value=session))
     await tool.execute("c1", {"agent": "scribe", "message": "뉴스 찾아 줘"}, context=_context())
     assert seen == ["뉴스 찾아 줘"]
+
+
+DOC = Artifact(kind="document", path=".render/a/a-1.png", title="a.pptx", store="docs", pages=[".render/a/a-1.png"])
+
+
+async def test_receiver_artifacts_ride_on_ask_agent_result():
+    async def prompt(text, caller_scope=None):
+        collect_peer_artifacts([DOC])
+        return _reply("렌더했어요")
+
+    session = MagicMock()
+    session.prompt = prompt
+    tool = AskAgentTool(_agents(), AsyncMock(return_value=session))
+
+    result = await tool.execute("c1", {"agent": "scribe", "message": "보여 줘"}, context=_context())
+
+    assert result.artifacts == [DOC]
+    assert peer_artifacts.get() is None
+
+
+async def test_nested_ask_passes_artifacts_one_level_up():
+    outer: list[Artifact] = []
+    token = peer_artifacts.set(outer)
+    try:
+        async def prompt(text, caller_scope=None):
+            collect_peer_artifacts([DOC])
+            return _reply("ok")
+
+        session = MagicMock()
+        session.prompt = prompt
+        await AskAgentTool(_agents(), AsyncMock(return_value=session)).execute(
+            "c1", {"agent": "scribe", "message": "x"}, context=_context()
+        )
+    finally:
+        peer_artifacts.reset(token)
+    assert outer == [DOC]

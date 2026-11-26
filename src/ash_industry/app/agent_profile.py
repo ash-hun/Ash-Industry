@@ -150,6 +150,7 @@ class AgentProfile:
                 confidence_threshold=pcfg.effective_threshold(),
                 cooldown_sec=pcfg.cooldown_sec,
                 ignore_after_sec=pcfg.ignore_after_sec,
+                awaiting_expire_sec=pcfg.awaiting_expire_sec,
                 threshold_provider=learner.threshold,
                 cooldown_provider=lambda: pcfg.cooldown_sec,
             )

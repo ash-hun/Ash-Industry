@@ -32,7 +32,7 @@ voice:
 ## LLM
 
 ```bash
-ASH_LLM__PROVIDER=anthropic        # anthropic | openai | gemini | ollama | vllm
+ASH_LLM__PROVIDER=anthropic        # anthropic | openai | ollama | vllm
 ASH_LLM__MODEL=claude-sonnet-4-5
 ASH_LLM__API_KEY=
 ASH_LLM__BASE_URL=                 # Ollama, vLLM, OpenAI 호환 주소. OpenAI 는 비우면 기본 주소
@@ -144,6 +144,7 @@ ASH_SECURITY__ALLOWED_ROLES=["user","admin"]
 ASH_SECURITY__INPUT_MAX_LENGTH=10000
 ASH_SECURITY__APPROVALS_PATH=~/.ash/approvals.yaml        # 공용 규칙(사람이 고친다)
 ASH_SECURITY__AGENT_APPROVALS_DIR=~/.ash/approvals         # 에이전트별 규칙(<agent_id>.yaml, 항상 허용이 쌓인다)
+ASH_SECURITY__AUTO_APPROVE_PATH=~/.ash/auto_approve.yaml   # 에이전트별 auto mode
 ASH_SECURITY__REQUIRE_APPROVAL_FOR=["bash","write_file","edit_file"]  # 실행 전 승인을 묻는 도구
 ASH_SECURITY__DANGEROUS_COMMANDS=[...]                          # 위험 명령 정규식. bash 의 command 에 걸리면 승인 없이 막는다. [] 이면 끈다
 ```
@@ -158,6 +159,8 @@ ASH_SECURITY__DANGEROUS_COMMANDS=[...]                          # 위험 명령 
 ASH_SECURITY__MCP_POLICY_PATH=~/.ash/mcp_policy.yaml  # MCP 도구별 allow, ask, deny 와 에이전트별 서버
 ASH_SECURITY__MCP_AUDIT_PATH=~/.ash/mcp_audit.jsonl   # MCP 호출 판정과 결과 기록
 ASH_DOCS_DIR=~/Documents/ash   # compose 전용. 문서 도구가 읽고 쓰는 폴더. ash-mcp 컨테이너의 /data/documents 로 붙는다
+ASH_UPLOAD_DIR=/tmp/ash-uploads   # compose 전용. 채팅 첨부를 두는 호스트 폴더
+ASH_DOCS__UPLOAD_TTL_HOURS=24     # 첨부를 지우는 기한(시간)
 ```
 
 Docker Compose 의 기본 `ASH_MCP_SERVERS` 에는 Google Workspace 서버(`ash-mcp:8000`)와 문서 도구 서버 `docs`(`ash-mcp:8001`, 시간 제한 180초)가 들어 있다. `ASH_MCP_SERVERS` 를 직접 적으면 이 기본 목록을 통째로 바꾸므로 쓰려는 서버를 모두 적는다. 정책 파일의 형식은 [Tool & Approve System](../concepts/conversation/tools-and-approval.md#mcp-도구-정책), 문서 도구는 [Document Tools](../concepts/conversation/documents.md) 에 있다.

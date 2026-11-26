@@ -43,8 +43,9 @@ class Preview(BaseModel):
 
 
 def preview(document: Document, plan: EditPlan) -> Preview:
-    """계획을 문서에 대 본다. 모르는 id, 같은 id 두 번, 변화 없는 항목은 issues 로."""
+    """계획을 문서에 대 본다. 읽기 전용 id, 모르는 id, 같은 id 두 번, 변화 없는 항목은 issues 로."""
     texts = document.texts()
+    readonly = document.readonly_ids()
     changes: list[Change] = []
     issues: list[str] = []
     seen: set[str] = set()
@@ -53,6 +54,9 @@ def preview(document: Document, plan: EditPlan) -> Preview:
             issues.append(f"같은 대상이 두 번: {item.target}")
             continue
         seen.add(item.target)
+        if item.target in readonly:
+            issues.append(f"고칠 수 없는 대상(읽기 전용): {item.target}")
+            continue
         if item.target not in texts:
             issues.append(f"없는 대상: {item.target}")
             continue

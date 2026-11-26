@@ -41,6 +41,52 @@ def test_derive_events_non_json_becomes_single_hashed_item() -> None:
     assert events[0].detail == "그냥 텍스트 응답"
 
 
+MAIL_TEXT = """Found 2 messages matching 'label:경제 is:unread':
+
+📧 MESSAGES:
+  1. Message ID: 1a20bd0cc80c3cda
+     Subject: 금리 동결 브리핑
+     From: 뉴스레터 <news@example.com>
+     Date: Mon, 23 Nov 2026 20:29:22 -0800
+     Web Link: https://mail.google.com/mail/u/me/#all/1a20bd0cc80c3cda
+
+  2. Message ID: 1a20bcf6a92c581c
+     Subject: 환율 주간 정리
+     Date: Mon, 23 Nov 2026 20:27:52 -0800
+
+💡 USAGE:
+  • Pass the Message IDs **as a list** to get_gmail_messages_content_batch()
+"""
+
+EVENT_TEXT = """Successfully retrieved 2 events from calendar 'primary' for me@example.com:
+- "팀 회의" (Starts: 2026-12-18T17:30:00+09:00 [Asia/Seoul], Ends: 2026-12-18T18:30:00+09:00) ID: 6ks4d3k | Link: https://x/e
+- "결혼식" (Starts: 2027-01-17 [weekday: Sunday], Ends: 2027-01-18 [exclusive all-day end]) ID: _6sq3acp
+
+Next page token: Ek0KSxJJ
+"""
+
+
+def test_derive_events_splits_mail_text_into_one_event_per_message() -> None:
+    events = derive_events("gmail", MAIL_TEXT)
+
+    assert [e.key for e in events] == ["gmail:1a20bd0cc80c3cda", "gmail:1a20bcf6a92c581c"]
+    assert [e.title for e in events] == ["금리 동결 브리핑", "환율 주간 정리"]
+    assert events[0].occurred_at == "Mon, 23 Nov 2026 20:29:22 -0800" and "news@example.com" in events[0].detail
+    assert "USAGE" not in events[1].detail
+    added = "  2. Message ID: 1a20ffff00000000\n     Subject: 새 메일\n\n  3. Message ID"
+    grown = MAIL_TEXT.replace("  2. Message ID", added)
+    assert [e.key for e in derive_events("gmail", grown)][:2] == ["gmail:1a20bd0cc80c3cda", "gmail:1a20ffff00000000"]
+
+
+def test_derive_events_splits_calendar_text_into_events() -> None:
+    events = derive_events("cal", EVENT_TEXT)
+
+    assert [(e.key, e.title, e.occurred_at) for e in events] == [
+        ("cal:6ks4d3k", "팀 회의", "2026-12-18T17:30:00+09:00"), ("cal:_6sq3acp", "결혼식", "2027-01-17"),
+    ]
+    assert derive_events("gmail", "No messages found for query: 'label:경제'") == []
+
+
 def test_derive_events_hash_key_is_stable_and_content_sensitive() -> None:
     a = derive_events("src", json.dumps([{"summary": "회의"}]))[0]
     b = derive_events("src", json.dumps([{"summary": "회의"}]))[0]

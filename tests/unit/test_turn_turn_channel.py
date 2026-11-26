@@ -4,10 +4,12 @@ from ash_industry.agent_layer.agent_types import (
     AgentEndEvent,
     AgentStartEvent,
     MessageUpdateEvent,
+    QueueDeliveredEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
 from ash_industry.agent_layer.turn_channel import PROGRESS_TEXT_CHARS, TurnChannel
+from ash_industry.model_layer.model_types import Artifact
 
 
 def _channel():
@@ -61,3 +63,23 @@ async def test_counts_running_tools_even_after_detach():
     channel.detach()
     await channel.emit(ToolExecutionEndEvent(tool_call_id="t", tool_name="render", result=None, is_error=False))
     assert channel.tools_running == 0
+
+
+async def test_detached_turn_still_sends_artifacts_and_delivered_to_background_sink():
+    channel, seen = _channel()
+    background = []
+
+    async def sink(event):
+        background.append(event)
+
+    channel.background_sink = sink
+    channel.detach()
+    doc = Artifact(kind="document", path=".render/a/a-1.png", store="docs", pages=[".render/a/a-1.png"])
+    await channel.emit(ToolExecutionEndEvent(tool_call_id="t", tool_name="ask_agent", is_error=False, artifacts=[doc]))
+    await channel.emit(ToolExecutionEndEvent(tool_call_id="u", tool_name="bash", is_error=False))
+    await channel.emit(ToolExecutionEndEvent(tool_call_id="v", tool_name="x", is_error=True, artifacts=[doc]))
+    await channel.emit(QueueDeliveredEvent(session_id="s", items=[]))
+    assert seen == []
+    assert [(e.type, getattr(e, "tool_name", "")) for e in background] == [
+        ("tool_execution_end", "ask_agent"), ("queue_delivered", ""),
+    ]

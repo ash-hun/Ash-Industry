@@ -45,6 +45,8 @@ web = [
     "websockets>=13.0",
     # 앱(iOS 홈 화면 웹앱)으로 보내는 Web Push. VAPID 서명과 본문 암호화
     "pywebpush>=2.0",
+    # 채팅 첨부파일 업로드(multipart/form-data)
+    "python-multipart>=0.0.9",
 ]
 voice = [
     "faster-whisper>=1.0.0",
@@ -53,9 +55,6 @@ voice = [
 ]
 mcp = [
     "mcp>=2.0,<3",
-]
-gemini = [
-    "google-genai>=1.0.0",
 ]
 scheduler = [
     "croniter>=2.0.0",

@@ -67,12 +67,14 @@ class SessionRegistry:
         from ash_industry.core.policy.policy import AllowAllPolicy
 
         s = self._ctx.settings
+        auto = getattr(self._ctx, "auto_approve", None)
         sandbox = DefaultSandbox(
             dangerous_patterns=s.security.dangerous_commands,
             require_approval_for=s.security.require_approval_for,
             approval_rules=self._agents.approval_rules(agent_id),
             mcp_gate=getattr(self._ctx, "mcp_gate", None),
             agent_id=agent_id,
+            auto_approve=(lambda: auto.enabled(agent_id)) if auto is not None else None,
         )
         # 접근 키가 있으면 키 → (이름, roles) 로 사용자를 식별한다. AuthContext.user_id 가 이름이 되어
         # rate limit 과 tool executor 의 사용자별 정책에 그대로 흐른다

@@ -10,9 +10,10 @@ from hwpx.opc.package import HwpxPackageError
 from hwpx import HwpxError, HwpxDocument, Hwp5ConversionWarning
 
 from docparse.template.template_schema import (
-    AnyLocator, FillValue, TableCellLocator, AnchorTextLocator, PlaceholderLocator,
+    AnyLocator, FillValue, CheckboxLocator, TableCellLocator, InlineSlotLocator, AnchorTextLocator, PlaceholderLocator,
 )
 from docparse.document_model import Cell, Document, Paragraph, Run, Table, cell_id, paragraph_id, table_id
+from docparse.template.slot_text import BOX_EMPTY, BOX_CHECKED, slot_span, box_positions
 from docparse.edit_plan import EditPlan
 
 CELL_PARAGRAPH = re.compile(r"^(t\d+r\d+c\d+)p(\d+)$")
@@ -124,6 +125,22 @@ def _replace_token(para: Any, token: str, text: str) -> int:
     return count
 
 
+def _fill_inline(para: Any, locator: InlineSlotLocator | CheckboxLocator, text: str) -> None:
+    """빈 괄호는 안쪽만, 체크 칸은 칸 기호 한 글자씩 바꾼다. 둘레 글과 run 서식은 그대로다."""
+    joined = _runs_text(para)
+    if isinstance(locator, InlineSlotLocator):
+        span = slot_span(joined, locator.label)
+        if span is None:
+            raise KeyError(f"빈 괄호가 없다: {locator.paragraph} {locator.label!r}")
+        _replace_span(para, span[0], span[1], text)
+        return
+    positions = box_positions(joined, locator.options)
+    if positions is None:
+        raise KeyError(f"선택지 칸이 없다: {locator.paragraph}")
+    for option, at in positions.items():
+        _replace_span(para, at, at + 1, BOX_CHECKED if option == text else BOX_EMPTY)
+
+
 def _fill_after_anchor(paragraphs: list[Any], anchor: str, text: str) -> bool:
     """anchor 뒤에 글이 있으면 그 글을, 없으면 anchor 가 없는 다음 문단을 바꾼다. anchor 가 없으면 False."""
     for i, para in enumerate(paragraphs):
@@ -148,6 +165,11 @@ def _fill_after_anchor(paragraphs: list[Any], anchor: str, text: str) -> bool:
 def _tables(doc: Any) -> list[Any]:
     # ponytail: 본문 문단에 바로 든 표만 센다(셀 안 표, 글상자 안 표는 빼고), 공고 양식에서 나오면
     return [t for p in doc.paragraphs for t in p.tables]
+
+
+def _table_anchors(doc: Any) -> list[int]:
+    """_tables 와 같은 순서로, 표마다 그 앞에 오는 본문 문단 수. 표는 그것을 품은 문단 바로 뒤에 둔다."""
+    return [i + 1 for i, p in enumerate(doc.paragraphs) for _ in p.tables]
 
 
 def _anchors(table: Any) -> Iterator[Any]:
@@ -194,6 +216,7 @@ class HwpxAdapter:
     def _document(self, doc: Any, path: Path) -> Document:
         paragraphs = tuple(_paragraph(doc, p, paragraph_id(i)) for i, p in enumerate(doc.paragraphs))
         tables: list[Table] = []
+        anchors = _table_anchors(doc)
         for ti, table in enumerate(_tables(doc)):
             cells: list[Cell] = []
             for entry in _anchors(table):
@@ -201,10 +224,11 @@ class HwpxAdapter:
                 inner = tuple(_paragraph(doc, p, f"{cid}p{k}") for k, p in enumerate(entry.cell.paragraphs))
                 cells.append(Cell(
                     id=cid, row=entry.row, col=entry.column, text=entry.cell.text, paragraphs=inner,
-                    merged=entry.span != (1, 1),
+                    merged=entry.span != (1, 1), row_span=entry.row_span, col_span=entry.col_span,
                 ))
             tables.append(Table(
                 id=table_id(ti), index=ti, rows=table.row_count, cols=table.column_count, cells=tuple(cells),
+                anchor=anchors[ti],
             ))
         fmt = "hwp" if path.suffix.lower() == ".hwp" else "hwpx"
         return Document(
@@ -269,7 +293,17 @@ class HwpxAdapter:
             if not any(_fill_after_anchor(scope, locator.after, text) for scope in scopes):
                 raise KeyError(f"기준 글이 없다: {locator.after!r}")
             return
+        if isinstance(locator, InlineSlotLocator | CheckboxLocator):
+            _fill_inline(self._paragraph(doc, locator.paragraph), locator, text)
+            return
         raise KeyError(f"HWPX 에 쓸 수 없는 자리: {locator.kind}")
+
+    def _paragraph(self, doc: Any, pid: str) -> Any:
+        if m := BODY_PARAGRAPH.match(pid):
+            return self._at(doc.paragraphs, int(m.group(1)), pid)
+        if m := CELL_PARAGRAPH.match(pid):
+            return self._at(self._cell(doc, m.group(1)).paragraphs, int(m.group(2)), pid)
+        raise KeyError(f"문단이 없다: {pid}")
 
     def to_html(self, path: Path) -> str:
         """문단과 표를 문서 순서대로. 병합은 rowspan, colspan 으로 옮기고 글은 모두 이스케이프한다."""

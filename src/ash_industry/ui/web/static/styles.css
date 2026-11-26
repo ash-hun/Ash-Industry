@@ -299,6 +299,8 @@ body[data-link="online"] .link-tick {
 }
 .session { --agent-color: var(--text-faint); }
 .session .marker { width: 6px; height: 6px; border: 1px solid var(--agent-color); display: block; }
+.session.unread .marker { background: var(--agent-color); }
+.session.unread .title { color: var(--text); }
 .session .title {
   color: var(--text); font-size: 11.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -616,10 +618,43 @@ body[data-ion="warning"] .ion-mark { color: var(--ion-warning); }
   z-index: 20;
   padding: 12px 0 16px;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   column-gap: 10px;
   align-items: center;
 }
+/* 첨부 — 📎 버튼, 입력창 위에 뜨는 파일 칩, 끌어다 놓을 때의 테두리 */
+.attach-btn {
+  border: 1px solid var(--line, color-mix(in srgb, var(--primary) 30%, transparent));
+  background: transparent; color: var(--pri-bright);
+  font-size: 14px; padding: 8px 10px; cursor: pointer; flex-shrink: 0;
+}
+.attach-btn:hover { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.composer.dropping { outline: 1px dashed var(--primary); outline-offset: 4px; }
+.attach-chips {
+  position: absolute; left: 0; right: 0; bottom: calc(100% - 6px);
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.attach-chips[hidden] { display: none; }
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  color: var(--pri-bright); font-family: var(--mono); font-size: 11px; padding: 3px 6px;
+}
+.attach-chip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-chip.uploading { opacity: 0.6; }
+.attach-chip.error { border-color: #e5484d; color: #e5484d; }
+.attach-chip .remove { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; padding: 0 2px; }
+.composer-actions { display: inline-flex; gap: 8px; align-items: center; }
+.auto-btn {
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  background: transparent; color: color-mix(in srgb, var(--pri-bright) 60%, transparent);
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; padding: 10px 10px; cursor: pointer;
+}
+.auto-btn.on { color: #1a1205; background: var(--accent, #ffd166); border-color: var(--accent, #ffd166); }
+.settings-note { margin: 0; font-size: 12px; line-height: 1.5; color: color-mix(in srgb, var(--pri-bright) 70%, transparent); }
+.auto-list { display: flex; flex-direction: column; gap: 6px; }
+.auto-row { display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; cursor: pointer; }
 .composer .prompt { color: var(--primary); font-size: 12px; letter-spacing: 0.18em; }
 .field-wrap {
   position: relative;
@@ -916,6 +951,10 @@ body[data-ion="warning"] .ion-mark { color: var(--ion-warning); }
 }
 .agent-nav.prev .chevron { transform: translateX(18%) rotate(-45deg); }
 .agent-nav.next .chevron { transform: translateX(-18%) rotate(135deg); }
+.agent-nav.unread::after {
+  content: ''; position: absolute; top: 18%; right: 18%;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--agent-color);
+}
 .agent-nav.busy { animation: nav-busy 1.4s ease-in-out infinite; color: var(--agent-color); }
 @keyframes nav-busy { 0%, 100% { opacity: .32; } 50% { opacity: .85; } }
 @media (prefers-reduced-motion: reduce) { .agent-nav.busy { animation: none; opacity: .7; } }
@@ -1016,6 +1055,18 @@ body[data-focus="on"] .agent-nav { display: none; }
   background: color-mix(in srgb, var(--bg-0) 72%, transparent); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
 }
 .media-overlay.hidden { display: none; }
+/* 넓은 화면에서는 모달 대신 가운데 열의 구체 자리에 띄운다(app/media.js 가 .reactor 안으로 옮긴다).
+ * 구체는 크기를 지킨 채 보이지 않게만 해서 크기를 재는 쪽(header.js, task-stars.js)이 0 을 받지 않는다 */
+.reactor > .media-overlay {
+  position: relative; inset: auto; z-index: 4; flex: 1 1 0; min-height: 0; width: 100%;
+  align-items: stretch; background: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.reactor > .media-overlay.hidden { display: none; }
+.reactor > .media-overlay .media-box { width: 100%; max-height: none; min-height: 0; }
+.reactor > .media-overlay .media-stage { flex: 1 1 auto; max-height: none; min-height: 0; overflow: auto; }
+.reactor > .media-overlay .media-stage :is(video, img:not(.media-page)) { max-height: 100%; }
+.reactor > .media-overlay .media-stage .media-pdf { height: 100%; min-height: 60vh; }
+.reactor:has(> .media-overlay:not(.hidden)) .sphere-wrap { position: absolute; visibility: hidden; pointer-events: none; }
 .media-box {
   width: min(900px, 92vw); max-height: 90vh; display: flex; flex-direction: column; gap: 10px;
   padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--hairline-strong);
@@ -1036,6 +1087,67 @@ body[data-focus="on"] .agent-nav { display: none; }
 .media-stage .media-pdf { width: 100%; height: 70vh; border: 0; background: #fff; }
 .media-pager { display: flex; align-items: center; justify-content: center; gap: 12px; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 .media-pager.hidden { display: none; }
+
+/* 문서 창의 편집 보기와 양식 등록 표(app/doc-edit.js) */
+.media-stage.doc-panel { display: block; }
+.doc-panel-body { padding: 10px 12px 16px; font-size: 12px; color: var(--text); }
+.doc-panel-head {
+  position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between;
+  padding: 6px 0 8px; background: var(--bg-0); font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: var(--primary);
+}
+.doc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.doc-msg:empty { display: none; }
+/* 편집 보기에서는 렌더 그림 경로가 필요 없다 */
+.media-stage.doc-panel ~ .media-path { display: none; }
+#media-edit.active { border-color: var(--primary); color: var(--pri-bright); }
+.doc-count { color: var(--text-dim); letter-spacing: .08em; }
+.doc-hint { color: var(--text-dim); font-size: 11px; margin: 4px 0 8px; }
+.doc-error { color: var(--red); font-size: 11px; margin: 4px 0; overflow-wrap: anywhere; }
+.doc-ok { color: var(--pri-bright); font-size: 11px; margin: 6px 0; }
+.doc-id { font-family: var(--mono); font-size: 9px; color: var(--text-faint); flex: 0 0 auto; min-width: 64px; }
+.doc-focus { outline: 1px solid var(--accent); }
+/* 편집 보기: 어두운 책상 위 흰 종이. 문서 글꼴과 색은 렌더와 비슷하게, 고칠 자리는 마우스와 커서로만 드러낸다 */
+.doc-desk { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 12px 0 28px; }
+.doc-paper {
+  width: min(100%, 794px); box-sizing: border-box; min-height: 60vh; padding: 56px 64px;
+  background: #fff; color: #1a1a1a; box-shadow: 0 2px 16px rgba(0, 0, 0, .5);
+  font-family: "Noto Serif KR", "AppleMyungjo", "Batang", serif; font-size: 15px; line-height: 1.6; letter-spacing: 0;
+}
+.doc-paper.doc-slide { aspect-ratio: 16 / 9; min-height: 0; padding: 28px 40px; overflow: auto; }
+.doc-paper.doc-sheet-page { width: 100%; min-height: 0; padding: 20px; font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 13px; }
+.doc-title { margin: 0 0 18px; padding-bottom: 6px; border-bottom: 2px solid #4472c4; color: #1f3864; font-size: 30px; font-weight: 500; }
+.doc-h1 { margin: 18px 0 8px; color: #2f5496; font-size: 22px; font-weight: 600; }
+.doc-h2 { margin: 14px 0 6px; color: #2f5496; font-size: 18px; font-weight: 600; }
+.doc-p { margin: 0 0 6px; min-height: 1.6em; }
+.doc-paper :is(.doc-title, .doc-h1, .doc-h2, .doc-p, td) { white-space: pre-wrap; overflow-wrap: anywhere; }
+.doc-paper .readonly { color: #777; font-style: italic; }
+.doc-paper .doc-sheet { margin-bottom: 8px; color: #777; font-family: var(--mono); font-size: 11px; }
+.doc-notes { margin-top: 18px; padding-top: 8px; border-top: 1px dashed #bbb; font-size: 13px; }
+.doc-table { margin: 10px 0 14px; overflow-x: auto; }
+.doc-grid { border-collapse: collapse; width: 100%; }
+.doc-grid td { border: 1px solid #222; padding: 3px 8px; vertical-align: top; min-width: 48px; }
+.doc-grid td.doc-void { background: #f2f2f2; }
+.doc-cell-line { display: flex; gap: 8px; border-bottom: 1px solid #ddd; }
+.doc-cell-line .doc-id { color: #888; }
+.doc-editable { outline: none; cursor: text; caret-color: #1f3864; }
+.doc-editable:hover { background: rgba(68, 114, 196, .07); }
+.doc-editable:focus { background: rgba(68, 114, 196, .1); box-shadow: inset 0 0 0 1px rgba(68, 114, 196, .55); }
+.doc-editable.changed { background: rgba(255, 192, 0, .28); }
+.doc-fields { border-collapse: collapse; width: 100%; font-size: 11px; }
+.doc-fields th { text-align: left; font-weight: normal; color: var(--text-dim); font-family: var(--mono); font-size: 9px; letter-spacing: .12em; }
+.doc-fields td, .doc-fields th { padding: 4px; border-bottom: 1px solid var(--hairline); }
+.doc-fields tr.low td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.doc-fields input:not([type]), .doc-fields select, .doc-template input {
+  width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: var(--bg-1); border: 1px solid var(--hairline-strong);
+}
+.doc-where { cursor: pointer; font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+.doc-where:hover { color: var(--pri-bright); }
+.doc-template { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.doc-template .art-btn { flex: 0 0 auto; white-space: nowrap; }
+.doc-template span { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+@media (max-width: 640px) {
+  .doc-fields th:nth-child(3), .doc-fields td:nth-child(3), .doc-fields th:nth-child(6), .doc-fields td:nth-child(6) { display: none; }
+}
 /* 음성 승인: 화면을 가리지 않고 아래쪽에 띠로. 묻고 답하기는 음성이 한다 */
 .approval-overlay.voice {
   background: transparent; backdrop-filter: none;
@@ -1196,6 +1308,7 @@ body[data-focus="on"] .agent-nav { display: none; }
   color: var(--pri-bright);
   box-shadow: 0 0 8px color-mix(in srgb, var(--primary) 20%, transparent);
 }
+.art-btn:disabled { opacity: .35; cursor: default; pointer-events: none; }
 .art-close { border-color: rgba(240,95,95,0.35); }
 .art-close:hover { border-color: var(--red); color: var(--red); box-shadow: none; }
 

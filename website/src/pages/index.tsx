@@ -11,7 +11,7 @@ type Card = {title: string; body: string; to: string};
 const PURPOSES: Card[] = [
   {
     title: '모델을 바꿔 가며 쓰고 싶다',
-    body: '로컬 모델(Ollama, vLLM)과 클라우드 모델(Anthropic, OpenAI, Gemini)을 설정 한 줄로 바꾼다.',
+    body: '로컬 모델(Ollama, vLLM)과 클라우드 모델(Anthropic, OpenAI)을 설정 한 줄로 바꾼다.',
     to: '/reference/configuration',
   },
   {

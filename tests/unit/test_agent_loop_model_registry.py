@@ -6,4 +6,4 @@ from ash_industry.model_layer.model_registry import build_default_registry
 def test_default_registry_lists_builtin_providers():
     names = build_default_registry().list_names()
 
-    assert {"anthropic", "openai", "ollama", "vllm", "gemini"} <= set(names)
+    assert {"anthropic", "openai", "ollama", "vllm"} <= set(names)

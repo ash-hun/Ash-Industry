@@ -105,8 +105,13 @@ class ExternalEventPoller:
             return 0
 
         if not fresh:
+            logger.debug(f"[ExternalEventPoller] {len(collected)} event(s), none new")
             return 0
 
+        logger.info(
+            f"[ExternalEventPoller] {len(fresh)} new event(s) from "
+            f"{', '.join(sorted({e.source for e in fresh}))}"
+        )
         if len(fresh) == self._max_events:
             logger.info(
                 f"[ExternalEventPoller] 상한 {self._max_events}건까지 전달. "

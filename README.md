@@ -18,7 +18,7 @@
 기본 에이전트 하나에 팀 에이전트를 yaml 파일로 더하고, 브라우저 Web HUD 나 데스크톱 앱에서 대화하고 지켜본다.
 
 - **팀 에이전트**: 에이전트마다 세션, 기억, 도구, 승인 규칙을 따로 갖고 서로 일을 맡긴다
-- **멀티프로바이더**: Anthropic, OpenAI, Gemini, Ollama, vLLM
+- **멀티프로바이더**: Anthropic, OpenAI, Ollama, vLLM
 - **장기 기억**: Postgres 에 사용자 프로필, 일화, 절차를 남긴다
 - **먼저 말 걸기**: 대화에서 흘린 약속을 기억했다가 때가 되면 먼저 알린다
 - **스케줄과 목표**: `/schedule`, `/goal` 로 맡긴 일을 혼자 이어 간다
@@ -62,7 +62,7 @@ uv run ash-industry                  # http://localhost:7777
 `.env` 에서 프로바이더와 모델을 정한다.
 
 ```bash
-ASH_LLM__PROVIDER=anthropic          # anthropic | openai | gemini | ollama | vllm
+ASH_LLM__PROVIDER=anthropic          # anthropic | openai | ollama | vllm
 ASH_LLM__MODEL=claude-sonnet-4-5
 ASH_LLM__API_KEY=sk-ant-...
 

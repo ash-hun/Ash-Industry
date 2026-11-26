@@ -26,7 +26,9 @@ class FakeSession:
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
-    async def prompt(self, text: str, credentials: dict[str, str], detach: bool = False) -> None:
+    async def prompt(
+        self, text: str, credentials: dict[str, str], detach: bool = False, images: list | None = None,
+    ) -> None:
         self.prompts.append(text)
 
 

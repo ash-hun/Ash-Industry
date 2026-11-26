@@ -1,4 +1,4 @@
-// 도구가 만든 결과물(영상, 음악, 이미지, 문서 렌더)을 모달로 띄운다. 미디어는 /api/creative/files/, 문서 쪽 그림과
+// 도구가 만든 결과물(영상, 음악, 이미지, 문서 렌더)을 가운데 열에(좁은 화면은 모달로) 띄운다. 미디어는 /api/creative/files/, 문서 쪽 그림과
 // PDF 는 /api/docs/files/ 로 받는다. 접근 키가 있으면 <video src> 가 헤더를 못 보내므로 apiFetch 로 받아 blob URL 로 쓴다.
 import { apiFetch } from './api.js';
 import { logActivity } from './shell.js';
@@ -8,7 +8,6 @@ const $kind = document.getElementById('media-kind');
 const $title = document.getElementById('media-title');
 const $stage = document.getElementById('media-stage');
 const $path = document.getElementById('media-path');
-const $open = document.getElementById('media-open');
 const $close = document.getElementById('media-close');
 const $pager = document.getElementById('media-pager');
 const $page = document.getElementById('media-page');
@@ -36,8 +35,15 @@ function note(text) {
   return Object.assign(document.createElement('p'), { className: 'media-loading', textContent: text });
 }
 
+// 문서 창의 편집 보기(doc-edit.js)가 띄운 문서를 안다. 문서가 아니면 null
+function announce(artifact) {
+  $stage.classList.remove('doc-panel');
+  document.dispatchEvent(new CustomEvent('media:document', { detail: artifact }));
+}
+
 export function hideMedia() {
   $overlay.classList.add('hidden');
+  announce(null);
   _doc = null;
   _seq++;
   clearStage();
@@ -61,25 +67,37 @@ async function loadBlob(url, seq) {
   return _blobUrl;
 }
 
+// 넓은 화면은 가운데 열(구체 자리)에, 좁은 화면은 지금처럼 모달로. 띄울 때마다 화면 폭으로 정한다
+const $reactor = document.querySelector('.reactor');
+const DOCK = window.matchMedia('(min-width: 861px)');
+
+export function dockFrame($frame) {
+  const docked = DOCK.matches && !!$reactor;
+  const home = docked ? $reactor : document.body;
+  if ($frame.parentElement !== home) home.append($frame);
+  $frame.setAttribute('aria-modal', docked ? 'false' : 'true');
+}
+
 function openFrame(kind, title, path) {
+  dockFrame($overlay);
   $kind.textContent = kind;
   $title.textContent = title || path;
   $path.textContent = path;
   $overlay.classList.remove('hidden');
 }
 
-// 결과물 하나를 모달에. 같은 턴에 여럿이면 문서, 영상, 음악, 이미지 순으로 하나만 띄운다
+// 결과물 하나를 띄운다. 같은 턴에 여럿이면 문서, 영상, 음악, 이미지 순으로 하나만 띄운다
 export async function showMedia(artifact) {
   if (!PLAYABLE.has(artifact.kind)) return;
   if (artifact.kind === 'document') { showDocument(artifact); return; }
   const url = fileUrl(artifact.store, artifact.path);
   if (!url) return;
   _lastShown = { path: artifact.path, at: Date.now() };
+  announce(null);
   _doc = null;
   $pager.classList.add('hidden');
   $stage.classList.remove('doc');
   const seq = ++_seq;
-  $open.href = url;
   openFrame(artifact.kind.toUpperCase(), artifact.title, artifact.path);
   const blobUrl = await loadBlob(url, seq);
   if (!blobUrl) return;
@@ -92,14 +110,24 @@ export async function showMedia(artifact) {
   logActivity(`▶ ${artifact.kind} · ${artifact.title || artifact.path}`, 'ok');
 }
 
-// 문서 렌더: 쪽 PNG 여럿은 넘겨 보고, PDF 는 브라우저 뷰어로. 새 탭은 받은 blob 을 연다(접근 키 헤더가 필요 없게)
+// 문서 렌더: 쪽 PNG 여럿은 넘겨 보고, PDF 는 브라우저 뷰어로
 function showDocument(artifact) {
   const pages = Array.isArray(artifact.pages) && artifact.pages.length ? artifact.pages : [artifact.path];
   _doc = { title: artifact.title || artifact.path, pages, index: 0 };
+  announce(artifact);
   $stage.classList.add('doc');
   openFrame('DOC', _doc.title, pages[0]);
   showPage(0);
   logActivity(`▤ 문서 · ${_doc.title} (${pages.length}쪽)`, 'ok');
+}
+
+// 편집 보기가 저장한 새 문서로 바꾼다. 쪽 그림은 받지 않고(편집 보기가 창을 쓰는 중), 그림으로 돌아갈 때 받는다
+export function adoptDocument(artifact) {
+  const pages = Array.isArray(artifact.pages) && artifact.pages.length ? artifact.pages : [artifact.path];
+  _doc = { title: artifact.title || artifact.path, pages, index: 0 };
+  _seq++;
+  $title.textContent = _doc.title;
+  $path.textContent = pages[0];
 }
 
 async function showPage(index) {
@@ -114,10 +142,8 @@ async function showPage(index) {
   $next.disabled = _doc.index === pages.length - 1;
   $path.textContent = path;
   const seq = ++_seq;
-  $open.removeAttribute('href');
   const blobUrl = await loadBlob(fileUrl('docs', path), seq);
   if (!blobUrl) return;
-  $open.href = blobUrl;
   const el = document.createElement(isPdf ? 'iframe' : 'img');
   el.src = blobUrl;
   el.className = isPdf ? 'media-pdf' : 'media-page';
@@ -155,8 +181,10 @@ export function onReplyText(text) {
 // tool_execution_end 의 artifacts 에서 띄울 것 하나를 고른다
 export function onToolArtifacts(artifacts) {
   if (!Array.isArray(artifacts) || !artifacts.length) return;
+  const form = artifacts.find((a) => a.kind === 'form');
+  if (form) document.dispatchEvent(new CustomEvent('form:open', { detail: form }));
   const order = ['document', 'video', 'audio', 'image'];
-  const pick = [...artifacts].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind))[0];
+  const pick = artifacts.filter((a) => a.kind !== 'form').sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind))[0];
   if (pick && PLAYABLE.has(pick.kind)) showMedia(pick);
 }
 
@@ -166,6 +194,8 @@ $next?.addEventListener('click', () => showPage((_doc?.index ?? 0) + 1));
 $overlay?.addEventListener('click', (e) => { if (e.target === $overlay) hideMedia(); });
 document.addEventListener('keydown', (e) => {
   if ($overlay.classList.contains('hidden')) return;
+  // 가운데 열에 띄웠을 때는 채팅 입력 같은 바깥 글 입력의 키를 가로채지 않는다
+  if (e.target.closest?.('input, textarea, select') && !$overlay.contains(e.target)) return;
   if (e.key === 'Escape') hideMedia();
   // 글 입력 중이 아닐 때만 화살표로 쪽을 넘긴다
   else if (_doc && !e.target.closest?.('input, textarea') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {

@@ -19,13 +19,12 @@ import TabItem from '@theme/TabItem';
 
 ## LLM Provider 고르기
 
-로컬 LLM(Ollama, vLLM)과 클라우드 LLM API(Anthropic, OpenAI, Google Gemini)를 연동할 수 있다. 프로바이더는 `.env` 의 `ASH_LLM__PROVIDER` 로 고르고, 실행하기 전에 정해 둔다.
+로컬 LLM(Ollama, vLLM)과 클라우드 LLM API(Anthropic, OpenAI)를 연동할 수 있다. 프로바이더는 `.env` 의 `ASH_LLM__PROVIDER` 로 고르고, 실행하기 전에 정해 둔다.
 
 | 프로바이더 | `ASH_LLM__PROVIDER` | API 키 |
 |---|---|---|
 | Anthropic (Claude) | `anthropic` | 필요 |
 | OpenAI (GPT) | `openai` | 필요 |
-| Google (Gemini) | `gemini` | 필요, `uv sync --extra gemini` |
 | Ollama (로컬) | `ollama` | 불필요 |
 | vLLM (로컬) | `vllm` | 불필요 |
 

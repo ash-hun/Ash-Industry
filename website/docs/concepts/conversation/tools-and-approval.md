@@ -126,8 +126,8 @@ flowchart TD
 | `glob` | 패턴으로 파일 찾기, 최근 수정순 | |
 | `grep` | 정규식 검색, 바이너리 건너뜀 | |
 | `list_dir` | 디렉토리 나열 | |
-| `web_search` | Brave(키 있으면) 또는 DuckDuckGo | |
-| `web_fetch` | URL 본문을 텍스트로 | |
+| `web_search` | Brave(키 있으면) 또는 DuckDuckGo. 기간(`freshness`)을 걸 수 있고 출처와 게시일을 알면 붙인다 | |
+| `web_fetch` | URL 본문을 텍스트로. PDF 는 앞 50쪽 글. 10MB 까지 받고 사설 주소는 리다이렉트 끝까지 확인해 막는다(DNS rebinding 은 막지 못한다) | |
 
 확장 패키지가 `ctx.agent_tools` 에 등록한 도구는 에이전트만 쓰는 도구다. 앱 레지스트리에 넣지 않고, 에이전트 정의의 `tools` 에 이름을 적은 에이전트만 받는다([Extension](../extension.md#확장-패키지)).
 
@@ -176,6 +176,16 @@ rules:
 ```
 
 승인이 필요한 도구 목록은 `ASH_SECURITY__REQUIRE_APPROVAL_FOR` 로 정한다(기본 `bash`, `write_file`, `edit_file`). 규칙 파일 하나를 앱 전체가 공유한다.
+
+### auto mode
+
+auto mode 를 켠 에이전트는 승인이 필요한 도구와 MCP ask 도구를 묻지 않고 실행한다. HUD 입력 독의 `AUTO` 나 SET 화면의 AUTO MODE 카드에서 에이전트마다 켜고 끄며, 값은 `~/.ash/auto_approve.yaml` 에 남고 열린 세션도 다음 호출부터 따른다. 기본은 꺼짐이고, 파일이 깨졌으면 모두 꺼진 것으로 본다.
+
+위험 명령(`DANGEROUS_COMMANDS`), MCP deny, 정의의 `never` 는 켜도 막는다. 스케줄과 목표처럼 사람이 없는 실행에는 적용하지 않는다.
+
+:::danger
+auto mode 에서는 파일 쓰기와 셸 명령이 확인 없이 실행된다. 믿고 맡길 에이전트에만, 필요한 동안만 켠다.
+:::
 
 ### 에이전트의 경계
 

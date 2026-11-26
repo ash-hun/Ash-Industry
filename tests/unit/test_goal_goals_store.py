@@ -33,3 +33,10 @@ def test_ensure_reactivates_a_finished_goal(tmp_path):
 def test_save_leaves_no_temp_file(tmp_path):
     GoalStore(str(tmp_path)).ensure(make())
     assert [p.suffix for p in tmp_path.iterdir()] == [".json"]
+
+
+def test_delete_removes_goal_once(tmp_path):
+    store = GoalStore(str(tmp_path))
+    goal, _ = store.ensure(make())
+    assert store.delete(goal.id) is True and store.delete(goal.id) is False
+    assert store.get(goal.id) is None and store.list() == []

@@ -20,8 +20,15 @@ const _motion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 let _switch = null;   // session.js 가 넘긴 전환 함수(agentId) => Promise
 let _busy = false;
+let _unread = new Set();  // 안 읽은 말이 온 세션의 에이전트. 화살표에 점을 찍는다
 
 export function setAgentSwitcher(fn) { _switch = fn; }
+
+// 다른 에이전트 세션에 말이 왔다. 그 에이전트 쪽 화살표에 점을 찍는다
+export function setUnreadAgents(ids) {
+  _unread = new Set(ids);
+  renderAgentNav();
+}
 
 // 지금 에이전트에서 step(±1)만큼 옮긴 에이전트. 끝에서는 반대 끝으로 돈다
 function neighbor(step) {
@@ -35,6 +42,7 @@ function label($btn, agent) {
   $btn.style.setProperty('--agent-color', agent.palette.primary);
   $btn.setAttribute('aria-label', `${agent.name} 으로 전환`);
   $btn.title = agent.name;
+  $btn.classList.toggle('unread', _unread.has(agent.id));
 }
 
 // 세션에 붙을 때마다 부른다. 에이전트가 하나면 화살표를 숨긴다

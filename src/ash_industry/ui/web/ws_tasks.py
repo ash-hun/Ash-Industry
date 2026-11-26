@@ -14,6 +14,7 @@ from ash_industry.common.logger import get_logger
 if TYPE_CHECKING:
     from ash_industry.agent_layer.thought.reply import ReplyClassifier
     from ash_industry.core.focus.focus_service import FocusService
+    from ash_industry.model_layer.model_types import ImageContent
     from ash_industry.core.focus.focus_types import FocusCommand
     from ash_industry.ui.web.adapter import PerConnectionAdapter
     from ash_industry.voice.voice_service import VoiceService
@@ -36,11 +37,12 @@ async def notify_quietly(notify: "Notify | None", payload: dict[str, Any] | None
 
 
 async def run_prompt(
-    session: "AgentSession", adapter: "PerConnectionAdapter", text: str, credentials: dict[str, str]
+    session: "AgentSession", adapter: "PerConnectionAdapter", text: str, credentials: dict[str, str],
+    images: "list[ImageContent] | None" = None,
 ) -> None:
     try:
         # 사람이 화면에서 기다리는 턴이라 오래 걸리면 선응답 뒤 뒤에서 이어 돈다
-        await session.prompt(text, credentials=credentials, detach=True)
+        await session.prompt(text, credentials=credentials, detach=True, images=images)
     except Exception as exc:
         await adapter.show_error(str(exc))
 

@@ -5,7 +5,6 @@ import pytest
 from ash_industry.model_layer.model_types import ErrorEvent, LLMContext, ModelConfig, StreamEvent, UserMessage
 from ash_industry.model_layer.providers.provider_base import NOT_IMPLEMENTED_CODE, Provider
 from ash_industry.model_layer.providers.anthropic import AnthropicProvider
-from ash_industry.model_layer.providers.gemini import GeminiProvider
 from ash_industry.model_layer.providers.ollama import OllamaProvider
 from ash_industry.model_layer.providers.openai import OpenAIProvider
 from ash_industry.model_layer.providers.vllm import VLLMProvider
@@ -34,7 +33,6 @@ async def test_base_stream_yields_single_not_implemented_error() -> None:
         (OpenAIProvider, "openai", False, True),
         (OllamaProvider, "ollama", True, True),
         (VLLMProvider, "vllm", False, False),
-        (GeminiProvider, "gemini", False, True),
     ],
 )
 def test_providers_inherit_base_and_keep_capabilities(cls: type[Provider], name: str, thinking: bool, images: bool):

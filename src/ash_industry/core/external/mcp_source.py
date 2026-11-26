@@ -18,6 +18,14 @@ CallMcpTool = Callable[["MCPServerConfig", str, dict[str, Any]], Awaitable[str]]
 
 logger = get_logger(__name__)
 
+# 인증이 풀리면 서버가 오류 대신 로그인 안내를 정상 결과로 돌려준다(workspace-mcp 2.5.0 의 google_auth.py).
+# 안내 속 URL 의 state 가 매번 바뀌어 중복 제거를 지나므로 새 이벤트로 쌓이지 않게 실패로 본다
+AUTH_REQUIRED_MARKERS = ("ACTION REQUIRED:",)
+
+
+def needs_auth(raw: str) -> bool:
+    return any(marker in raw[:500] for marker in AUTH_REQUIRED_MARKERS)
+
 
 class McpToolSource(ExternalSource):
     """MCP 툴을 1회 호출해 원문을 이벤트로 변환하는 소스.
@@ -40,6 +48,7 @@ class McpToolSource(ExternalSource):
         self._server = server
         self._call = call
         self._detail_max_chars = detail_max_chars
+        self._auth_failing = False
 
     async def poll(self) -> list[ExternalEvent]:
         call = self._call
@@ -63,6 +72,18 @@ class McpToolSource(ExternalSource):
             logger.info(f"[McpToolSource] '{self.name}': poll failed: {exc}")
             return []
 
+        if needs_auth(raw):
+            # 10분마다 같은 경고를 쌓지 않게 상태가 바뀔 때만 남긴다
+            if not self._auth_failing:
+                logger.warning(
+                    f"[McpToolSource] '{self.name}': server '{self._server.name}' needs sign-in, "
+                    f"skipping until it recovers"
+                )
+            self._auth_failing = True
+            return []
+        if self._auth_failing:
+            logger.info(f"[McpToolSource] '{self.name}': server '{self._server.name}' sign-in recovered")
+            self._auth_failing = False
         return derive_events(self.name, raw, detail_max_chars=self._detail_max_chars)
 
 

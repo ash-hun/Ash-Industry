@@ -15,6 +15,7 @@ from ash_industry.agent_layer.agent_types import (
     AgentErrorEvent,
     AgentEvent,
     AgentLoopConfig,
+    ArtifactsEvent,
     BackgroundTaskEvent,
     InnerThoughtEvent,
     MessageUpdateEvent,
@@ -46,19 +47,20 @@ from ash_industry.core.proactive import (
     ProactiveMessage,
     ProactivityCore,
 )
+from ash_industry.model_layer.model_types import (
+    AssistantMessage,
+    ImageContent,
+    ModelConfig,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+)
 from ash_industry.agent_layer.thought import (
     DefaultThoughtComposer,
     ThoughtComposer,
     ThoughtEngine,
     ThoughtLog,
     ThoughtRequest,
-)
-from ash_industry.model_layer.model_types import (
-    AssistantMessage,
-    ModelConfig,
-    TextContent,
-    ToolResultMessage,
-    UserMessage,
 )
 from ash_industry.agent_layer.thought.thought_types import ProactiveAction, SituationFact, ThoughtFrame
 from ash_industry.core.policy.pipeline import AuthContext, PolicyDenied, PolicyResult, SecurityPipeline
@@ -300,8 +302,11 @@ class AgentSession:
         credentials: dict[str, Any] | None = None,
         caller_scope: MemoryScope | None = None,
         detach: bool = False,
+        images: list[ImageContent] | None = None,
     ) -> AssistantMessage | None:
-        """caller_scope 는 이 세션을 부른 쪽(위임한 부모, 말을 건 에이전트)의 범위다. inherit_scope 세션만 쓴다.
+        """images 는 채팅 첨부 이미지다. 이번 턴 모델 호출에만 붙고 기록에는 첨부 안내 글만 남는다.
+
+        caller_scope 는 이 세션을 부른 쪽(위임한 부모, 말을 건 에이전트)의 범위다. inherit_scope 세션만 쓴다.
 
         detach 는 사람이 기다리는 대화(화면)에서만 켠다. 켜면 오래 걸리는 턴은 선응답을 돌려주고 뒤에서 이어 돈다.
         답을 받아 써야 하는 부른 쪽(에이전트 사이 위임, 스케줄)은 끄고 끝까지 기다린다.
@@ -314,7 +319,7 @@ class AgentSession:
             raise SessionBusy(BUSY_MESSAGE)
         self._set_busy(True)
         try:
-            return await self._prompt(raw_input, credentials or {}, caller_scope, detach)
+            return await self._prompt(raw_input, credentials or {}, caller_scope, detach, images)
         except BaseException:
             # run_main 진입 전 실패(검증·인증·rate limit·사고). run_main 의 finally 가 못 끈다.
             self._set_busy(False)
@@ -332,7 +337,8 @@ class AgentSession:
             self._idle.set()
 
     async def _prompt(
-        self, raw_input: str, creds: dict[str, Any], caller_scope: MemoryScope | None, detach: bool = False
+        self, raw_input: str, creds: dict[str, Any], caller_scope: MemoryScope | None, detach: bool = False,
+        images: list[ImageContent] | None = None,
     ) -> AssistantMessage | None:
         # 사용자 활동 기록. idle 트리거가 "조용해진 시점"을 알도록 리셋한다.
         if self._activity_clock is not None:
@@ -400,6 +406,7 @@ class AgentSession:
                 result = await self._harness.run(
                     inbox=self._inbox if detach else None,
                     user_input=expanded,
+                    images=images,
                     tool_executor=tool_executor,
                     extra_context={
                         "user_id": self._last_user_id,
@@ -515,13 +522,15 @@ class AgentSession:
             await self._session_repo.append(self._session_id, ack)
         except Exception as exc:
             logger.warning(f"[Turn] ack not saved: {exc!r}")
+        # 선응답도 먼저 건넨 말처럼 이미 한 말이다. 성찰이 이 말("끝나면 알려 드릴게요")을 알릴 거리로 다시 고르지 않게
+        self._recent_proactive.append(detached.ack)
         background_signal = self._harness.detach_foreground()
         self._set_busy(False)
         task_id = self._new_task_id()
         label = " ".join(request.split())[:BACKGROUND_LABEL_CHARS]
         running = RunningTask(task_id, label, detached.channel, background_signal, TurnInbox())
         detached.channel.background_inbox = running.inbox
-        detached.channel.background_sink = lambda event: self._on_task_delivered(running, event)
+        detached.channel.background_sink = lambda event: self._on_background_event(running, event)
         self._running[task_id] = running
         logger.info(f"[Turn] detached {task_id} session={self._session_id}: {label}")
         await self._harness.emit_event(BackgroundTaskEvent(
@@ -621,8 +630,13 @@ class AgentSession:
     def running_tasks(self) -> list[str]:
         return list(self._running)
 
-    async def _on_task_delivered(self, running: RunningTask, event: AgentEvent) -> None:
-        """뒤에서 도는 작업이 보낸 지시를 읽었다. 대기에서 반영으로 옮겨 별에 알린다."""
+    async def _on_background_event(self, running: RunningTask, event: AgentEvent) -> None:
+        """뒤에서 도는 작업의 이벤트 중 화면이 알아야 하는 것. 결과물은 문서 창과 플레이어로, 지시를 읽었으면 별로."""
+        if isinstance(event, ToolExecutionEndEvent):
+            await self._harness.emit_event(ArtifactsEvent(
+                session_id=self._session_id, tool_name=event.tool_name, artifacts=event.artifacts,
+            ))
+            return
         running.applied += len(getattr(event, "items", []))
         await self._emit_task_update(running)
 

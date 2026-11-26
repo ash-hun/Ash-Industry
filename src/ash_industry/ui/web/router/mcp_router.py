@@ -9,6 +9,8 @@ from ash_industry.core.policy.mcp_policy import MAX_CALLS_PER_HOUR, parse_policy
 from ash_industry.ui.web.web_state import WebState
 
 Mode = Literal["allow", "ask", "deny"]
+# 팀 프로필 파일 이름이 에이전트 id 다. 모르는 id 는 에이전트 제한이 없는 것으로 판정된다
+AGENT_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,39}$"
 
 
 class ToolPolicyPatch(BaseModel):
@@ -45,6 +47,7 @@ class McpPolicyPatch(BaseModel):
 
 POLICY_EXAMPLE = {
     "path": "/root/.ash/mcp_policy.yaml",
+    "agent": "main",
     "policy": {
         "defaults": {"read": "allow", "write": "ask", "unknown": "ask"},
         "servers": {"google": {"tools": {
@@ -68,16 +71,20 @@ AUDIT_EXAMPLE = {"entries": [
 def build_mcp_router(state: WebState) -> APIRouter:
     router = APIRouter(tags=["mcp"])
 
-    def _body() -> dict[str, Any]:
+    def _body(agent: str) -> dict[str, Any]:
         gate = state.ctx.mcp_gate
         if gate is None:
-            return {"path": "", "policy": policy_to_dict(parse_policy(None)), "tools": [], "enabled": False}
+            return {
+                "path": "", "agent": agent, "policy": policy_to_dict(parse_policy(None)), "tools": [],
+                "enabled": False,
+            }
         return {
             "path": gate.path,
+            "agent": agent,
             "policy": policy_to_dict(gate.policy),
             "tools": [
-                {"server": info.server, "name": name, "kind": info.kind, "effective": gate.effective_mode(name),
-                 "description": info.description}
+                {"server": info.server, "name": name, "kind": info.kind,
+                 "effective": gate.effective_mode(name, agent), "description": info.description}
                 for name, info in gate.tools()
             ],
             "enabled": True,
@@ -88,30 +95,35 @@ def build_mcp_router(state: WebState) -> APIRouter:
         summary="MCP 도구 정책과 도구 목록",
         description=(
             "policy 는 저장된 정책 문서(defaults, servers.<서버>.tools.<도구>, agents), tools 는 붙은 MCP 도구마다"
-            " 서버, 종류(read, write, unknown), 지금 판정(effective: allow, ask, deny)."
-            " mcp_servers 가 없으면 enabled false."
+            " 서버, 종류(read, write, unknown), agent 쿼리(기본 main)의 에이전트가 부를 때 판정(effective: allow, ask,"
+            " deny). mcp_servers 가 없으면 enabled false."
         ),
         responses={200: {"content": {"application/json": {"example": POLICY_EXAMPLE}}}},
     )
-    async def get_policy() -> JSONResponse:
-        return JSONResponse(_body())
+    async def get_policy(agent: str = Query(default="main", pattern=AGENT_ID_PATTERN)) -> JSONResponse:
+        return JSONResponse(_body(agent))
 
     @router.put(
         "/api/mcp/policy",
         summary="MCP 도구 정책 바꾸기",
-        description="정책 문서 전체를 받아 검증한 뒤 파일에 쓰고 바로 적용한다. 같은 본문을 두 번 보내도 같다.",
+        description=(
+            "정책 문서 전체를 받아 검증한 뒤 파일에 쓰고 바로 적용한다. 같은 본문을 두 번 보내도 같다."
+            " 응답의 effective 는 agent 쿼리(기본 main) 기준."
+        ),
         responses={
             200: {"content": {"application/json": {"example": POLICY_EXAMPLE}}},
             404: {"description": "mcp_servers 가 없어 정책 문이 없다"},
-            422: {"description": "모르는 mode, 범위 밖 calls_per_hour, 모르는 필드"},
+            422: {"description": "모르는 mode, 범위 밖 calls_per_hour, 모르는 필드, 형식이 틀린 agent"},
         },
     )
-    async def put_policy(patch: McpPolicyPatch) -> JSONResponse:
+    async def put_policy(
+        patch: McpPolicyPatch, agent: str = Query(default="main", pattern=AGENT_ID_PATTERN),
+    ) -> JSONResponse:
         gate = state.ctx.mcp_gate
         if gate is None:
             return JSONResponse({"error": "mcp_servers 가 없다"}, status_code=404)
         gate.update(parse_policy(patch.model_dump(exclude_none=True)))
-        return JSONResponse(_body())
+        return JSONResponse(_body(agent))
 
     @router.get(
         "/api/mcp/audit",

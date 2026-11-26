@@ -1,4 +1,4 @@
-"""[service] PPTX 어댑터. python-pptx 로 슬라이드의 글 도형과 표를 읽고 run 단위로 치환하거나 양식을 채운다."""
+"""[service] PPTX 어댑터. 글 도형과 표를 읽어 run 단위로 치환하거나 채우고, 노트와 차트 글은 읽기만 한다."""
 
 import re
 import html
@@ -54,6 +54,50 @@ def _tables(prs: Any) -> list[tuple[int, Any]]:
         for si, slide in enumerate(prs.slides) for shape in _walk(slide.shapes)
         if getattr(shape, "has_table", False)
     ]
+
+
+def _number(value: Any) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return "" if value is None else str(value)
+
+
+def _chart_lines(chart: Any) -> list[str]:
+    """차트 제목, 항목, 계열마다 `이름: 값, 값`. 산점도처럼 항목이 없는 차트는 계열 값만."""
+    lines: list[str] = []
+    if chart.has_title and chart.chart_title.has_text_frame:
+        title = chart.chart_title.text_frame.text.strip()
+        if title:
+            lines.append(title)
+    for plot in chart.plots:
+        try:
+            categories = [str(c) for c in plot.categories]
+        except (AttributeError, KeyError, ValueError):
+            categories = []
+        if categories:
+            lines.append(f"항목: {', '.join(categories)}")
+        for series in plot.series:
+            values = ", ".join(_number(v) for v in series.values)
+            lines.append(f"{series.name or '계열'}: {values}")
+    return lines
+
+
+def _readonly_paragraphs(slide: Any, si: int) -> list[Paragraph]:
+    """차트(s<슬라이드>c<도형>p<줄>)와 노트(s<슬라이드>np<줄>). 쓰기 경로가 없어 읽기만 한다."""
+    out: list[Paragraph] = []
+    for shape in _walk(slide.shapes):
+        if getattr(shape, "has_chart", False):
+            prefix = f"s{si}c{shape.shape_id}"
+            out.extend(
+                Paragraph(id=paragraph_id(k, prefix), text=line, style="chart", editable=False)
+                for k, line in enumerate(_chart_lines(shape.chart))
+            )
+    if slide.has_notes_slide and slide.notes_slide.notes_text_frame is not None:
+        for k, para in enumerate(slide.notes_slide.notes_text_frame.paragraphs):
+            text = _runs_text(para)
+            if text.strip():
+                out.append(Paragraph(id=paragraph_id(k, f"s{si}n"), text=text, style="notes", editable=False))
+    return out
 
 
 def _runs_text(para: Any) -> str:
@@ -132,12 +176,16 @@ class PptxAdapter:
         return self._document(_open(path), path)
 
     def _document(self, prs: Any, path: Path) -> Document:
-        # ponytail: 슬라이드 노트, 차트 글, 마스터의 글은 읽지 않는다, 그런 양식이 나오면
+        # ponytail: 마스터와 레이아웃의 글은 읽지 않는다, 그런 양식이 나오면
         paragraphs: list[Paragraph] = []
-        for si, shape in _text_shapes(prs):
-            prefix = shape_prefix(si, shape.shape_id)
-            for k, para in enumerate(shape.text_frame.paragraphs):
-                paragraphs.append(_paragraph(para, paragraph_id(k, prefix), style=shape.name))
+        for si, slide in enumerate(prs.slides):
+            for shape in _walk(slide.shapes):
+                if not shape.has_text_frame:
+                    continue
+                prefix = shape_prefix(si, shape.shape_id)
+                for k, para in enumerate(shape.text_frame.paragraphs):
+                    paragraphs.append(_paragraph(para, paragraph_id(k, prefix), style=shape.name))
+            paragraphs.extend(_readonly_paragraphs(slide, si))
         tables: list[Table] = []
         for ti, (si, table) in enumerate(_tables(prs)):
             cells: list[Cell] = []
@@ -145,7 +193,11 @@ class PptxAdapter:
                 cid = cell_id(ti, r, c)
                 inner = tuple(_paragraph(p, f"{cid}p{k}") for k, p in enumerate(cell.text_frame.paragraphs))
                 text = "\n".join(p.text for p in inner)
-                cells.append(Cell(id=cid, row=r, col=c, text=text, paragraphs=inner, merged=cell.is_merge_origin))
+                cells.append(Cell(
+                    id=cid, row=r, col=c, text=text, paragraphs=inner, merged=cell.is_merge_origin,
+                    row_span=cell.span_height if cell.is_merge_origin else 1,
+                    col_span=cell.span_width if cell.is_merge_origin else 1,
+                ))
             tables.append(Table(
                 id=table_id(ti), index=ti, rows=len(table.rows), cols=len(table.columns), cells=tuple(cells),
                 name=f"슬라이드 {si + 1}",
@@ -231,6 +283,8 @@ class PptxAdapter:
             parts.append(f"<section><h2>슬라이드 {si + 1}</h2>")
             body = [p for p in doc.paragraphs if p.id.startswith(f"s{si}sh") and p.text.strip()]
             parts.extend(f"<p>{html.escape(p.text)}</p>" for p in body)
+            charts = [p for p in doc.paragraphs if p.id.startswith(f"s{si}c")]
+            parts.extend(f"<p class=\"chart\">{html.escape(p.text)}</p>" for p in charts)
             for table in (t for t in doc.tables if t.name == f"슬라이드 {si + 1}"):
                 grid = {(c.row, c.col): c.text for c in table.cells}
                 parts.append("<table>")
@@ -238,5 +292,9 @@ class PptxAdapter:
                     row = "".join(f"<td>{html.escape(grid.get((r, c), ''))}</td>" for c in range(table.cols))
                     parts.append(f"<tr>{row}</tr>")
                 parts.append("</table>")
+            notes = [p for p in doc.paragraphs if p.id.startswith(f"s{si}np")]
+            if notes:
+                parts.append("<h3>노트</h3>")
+                parts.extend(f"<p class=\"notes\">{html.escape(p.text)}</p>" for p in notes)
             parts.append("</section>")
         return "".join(parts)

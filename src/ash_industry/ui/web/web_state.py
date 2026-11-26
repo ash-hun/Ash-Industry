@@ -18,6 +18,7 @@ from ash_industry.core.workflow.workflow_types import JobRecord
 from ash_industry.core.platform.loop_lag import LoopLagMonitor
 from ash_industry.ui.web.agent_activity import AgentActivity
 from ash_industry.ui.web.approvals import SessionApprovals
+from ash_industry.ui.web.session_relay import SessionRelay
 from ash_industry.core.workflow.job_board import JobBoard
 from ash_industry.ui.web.turn_replay import TurnReplay
 from ash_industry.common.logger import get_logger
@@ -84,6 +85,9 @@ class WebState:
         # 어느 에이전트가 일하는지. 둘 이상이면 HUD 구체가 색을 섞는다
         self.activity = AgentActivity(self.broadcast_live)
         self.registry.on_open(self.activity.watch)
+        # 화면을 옮겨도 놓치면 안 되는 것(결과물, 다른 세션의 먼저 건넨 말과 뒤에서 끝난 답). 열린 HUD 전부에 보낸다
+        self.relay = SessionRelay(self.broadcast_live)
+        self.registry.on_open(self.relay.watch)
         # 진행 중인 턴. 다른 에이전트로 옮겼다 돌아온 화면이 이것으로 진행 상황을 되살린다
         self.turns = TurnReplay()
         self.registry.on_open(self.turns.watch)

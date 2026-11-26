@@ -183,6 +183,16 @@ class QueueDeliveredEvent(BaseModel):
     timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
 
 
+class ArtifactsEvent(BaseModel):
+    """뒤로 넘긴 턴의 도구가 결과물(영상, 문서)을 만들었다. 그 턴의 도구 이벤트는 화면에 가지 않아 따로 보낸다."""
+
+    type: Literal["artifacts"] = "artifacts"
+    session_id: str
+    tool_name: str
+    artifacts: list[Artifact]
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+
+
 AgentEvent = (
     AgentStartEvent
     | TurnStartEvent
@@ -201,6 +211,7 @@ AgentEvent = (
     | BackgroundTaskEvent
     | QueueChangedEvent
     | QueueDeliveredEvent
+    | ArtifactsEvent
 )
 
 

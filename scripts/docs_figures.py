@@ -360,7 +360,7 @@ def architecture() -> Fig:
     mem = f.box(528, 174, "memory/", "작업 기억, 장기 기억", w=208, h=130)
     f.edge([boxes[2].right, (mem.x, boxes[2].cy)], "")
     f.edge([boxes[3].right, (mem.x, boxes[3].cy)], "")
-    prov = f.box(528, 318, "프로바이더", "anthropic, openai, gemini 외 2", w=208, kind="muted")
+    prov = f.box(528, 318, "프로바이더", "anthropic, openai 외 2", w=208, kind="muted")
     f.edge([boxes[4].right, prov.left], "muted", head=False)
     return f
 

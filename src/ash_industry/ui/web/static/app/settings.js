@@ -1,6 +1,7 @@
 // Settings 화면 — 서버가 준 필드 정의(fields)로 폼을 그리고, 바뀐 값만 PUT 하면 서버가 바로 반영한다.
 // 재시작은 Ion 이 먼저, 안 되면 백엔드 자기 재시작. 데스크톱 앱이면 앱 설정도.
 import { apiFetch } from './api.js';
+import { agents, loadAgents } from './agents.js';
 import { onViewOpen } from './view.js';
 import { setLinkState, logActivity, SYSTEM } from './shell.js';
 import { connect } from './session.js';
@@ -267,6 +268,7 @@ const $mcpAuditCount = document.getElementById('mcp-audit-count');
 const MODES = ['allow', 'ask', 'deny'];
 const KIND_LABEL = { read: '읽기', write: '쓰기', unknown: '모름' };
 let _mcpPolicy = null;   // 서버가 준 정책 문서. agents 는 화면에서 안 고치므로 그대로 돌려보낸다
+let _mcpAgent = 'main';  // 판정(effective)을 볼 에이전트. 에이전트마다 쓸 수 있는 서버가 다르다
 
 function modeSelect(id, value, withDefault) {
   const sel = document.createElement('select');
@@ -304,7 +306,7 @@ function renderMcp(body) {
     const label = document.createElement('label');
     label.append(`${KIND_LABEL[kind]} 도구 기본`, modeSelect(`mcp-default-${kind}`, _mcpPolicy.defaults?.[kind] || (kind === 'read' ? 'allow' : 'ask'), false));
     return label;
-  }));
+  }), agentSelect(body.agent || 'main'));
   const table = document.createElement('table');
   const head = table.createTHead().insertRow();
   for (const text of ['서버', '도구', '종류', '모드', '시간당', '인자 고정', '판정']) {
@@ -330,6 +332,25 @@ function renderMcp(body) {
     const eff = tr.insertCell(); eff.className = `eff-${t.effective}`; eff.textContent = t.effective || '—';
   }
   $mcpTools.replaceChildren(table);
+}
+
+function agentSelect(current) {
+  const ids = [...new Set(['main', ...agents().map((a) => a.id), ...Object.keys(_mcpPolicy?.agents || {}), current])];
+  const sel = document.createElement('select');
+  sel.id = 'mcp-agent';
+  for (const id of ids) {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = id; opt.selected = id === current;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => { _mcpAgent = sel.value; loadMcp(); });
+  const label = document.createElement('label');
+  label.append('판정 기준 에이전트', sel);
+  return label;
+}
+
+function policyUrl() {
+  return `/api/mcp/policy?agent=${encodeURIComponent(_mcpAgent)}`;
 }
 
 function collectMcpPolicy() {
@@ -371,7 +392,8 @@ function renderMcpAudit(entries) {
 
 export async function loadMcp() {
   try {
-    const [policy, audit] = await Promise.all([apiFetch('/api/mcp/policy'), apiFetch('/api/mcp/audit?limit=50')]);
+    await loadAgents();
+    const [policy, audit] = await Promise.all([apiFetch(policyUrl()), apiFetch('/api/mcp/audit?limit=50')]);
     if (!policy.ok) { $mcpCard.hidden = true; return; }
     renderMcp(await policy.json());
     if (audit.ok) renderMcpAudit((await audit.json()).entries || []);
@@ -381,7 +403,7 @@ export async function loadMcp() {
 $mcpSave?.addEventListener('click', async () => {
   const doc = collectMcpPolicy();
   try {
-    const res = await apiFetch('/api/mcp/policy', {
+    const res = await apiFetch(policyUrl(), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc),
     });
     if (!res.ok) { status($mcpStatus, `저장 실패 (${res.status})`, 'err'); return; }

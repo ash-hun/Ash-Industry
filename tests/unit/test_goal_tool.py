@@ -42,3 +42,19 @@ def test_standing_rule_applies_only_to_standing_requests_of_goal_capable_agents(
     for text in ("현금 1억, 월 150으로 맞는 공고 찾아줘", "가장 추천하는 게 뭐야?"):
         assert standing_rule(text, tools) is None, text
     assert standing_rule(TEXT, {"housing_budget"}) is None
+
+
+async def test_tool_deletes_goal_and_its_task_and_repeats_safely(tmp_path):
+    store = GoalStore(str(tmp_path))
+    svc = goal_scheduler()
+    svc.run_soon = lambda task: None  # type: ignore[method-assign]
+    tool = GoalTool(store, svc, now=lambda: NOW)
+    ctx = ToolContext(scope=MemoryScope(user_id="u", agent_id="scribe"))
+    await tool.execute("c", {"action": "set", "text": TEXT}, None, ctx)
+    await tool.execute("c", {"action": "stop", "text": TEXT}, None, ctx)
+
+    deleted = await tool.execute("c", {"action": "delete", "text": "원리금"}, None, ctx)
+    again = await tool.execute("c", {"action": "delete", "text": "원리금"}, None, ctx)
+
+    assert "지웠다" in deleted.content[0].text and "없다" in again.content[0].text
+    assert store.list("scribe") == [] and svc.list_tasks() == []

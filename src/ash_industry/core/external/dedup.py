@@ -1,5 +1,6 @@
 """[core] MCP 원문 응답을 외부 이벤트로 쪼개고, 이미 본 이벤트를 걸러 재발화를 막는다."""
 
+import re
 import json
 import time
 import asyncio
@@ -19,6 +20,15 @@ _LIST_FIELDS = ("items", "events", "messages", "results", "data")
 _ID_FIELDS = ("id", "uid", "eventId", "messageId", "threadId")
 _TITLE_FIELDS = ("title", "summary", "subject", "name", "description")
 _TIME_FIELDS = ("start", "date", "datetime", "occurred_at", "created", "timestamp", "receivedAt")
+# JSON 이 아닌 글 목록(workspace-mcp 2.5.0). 메일은 "  1. Message ID: <id>" 로 시작해
+# 빈 줄까지 "이름: 값" 줄이 이어지고,
+# 일정은 줄마다 '- "<제목>" (Starts: <시각>, ...) ID: <id> | Link: <url>' 이다. 항목마다 이벤트를 만들어야
+# 목록에 한 통이 더해져도 그 한 통만 새 것이 된다
+_MAIL_HEAD = re.compile(r"^\s*\d+\.\s+Message ID:\s*(\S+)\s*$")
+_MAIL_FIELD = re.compile(r"^\s+([A-Za-z][A-Za-z ]*):\s*(.*)$")
+# 결과가 없다는 안내. 이벤트가 아니다(일정 쪽 문구는 메일 쪽을 본떠 둔 추정)
+_EMPTY = re.compile(r"^No (?:messages|events) found\b", re.IGNORECASE)
+_EVENT_LINE = re.compile(r'^-\s+"(.*)"\s+\(Starts:\s*(\S+).*\)\s+ID:\s*(\S+)(?:\s*\|\s*Link:\s*(\S+))?\s*$')
 
 
 def derive_events(source: str, raw: str, *, detail_max_chars: int = 500) -> list[ExternalEvent]:
@@ -49,7 +59,9 @@ def _split_items(raw: str) -> list[Any]:
     try:
         payload = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        return [text]
+        if _EMPTY.match(text):
+            return []
+        return _text_items(text) or [text]
 
     if isinstance(payload, list):
         return list(payload)
@@ -60,6 +72,28 @@ def _split_items(raw: str) -> list[Any]:
                 return list(value)
         return [payload]
     return [text]
+
+
+def _text_items(text: str) -> list[dict[str, str]]:
+    """글 목록에서 메일 블록과 일정 줄을 항목으로. 알아보는 꼴이 없으면 빈 목록. 순수 함수."""
+    items: list[dict[str, str]] = []
+    mail: dict[str, str] | None = None
+    for line in text.splitlines():
+        head = _MAIL_HEAD.match(line)
+        if head is not None:
+            mail = {"id": head.group(1)}
+            items.append(mail)
+            continue
+        field = _MAIL_FIELD.match(line) if mail is not None else None
+        if mail is not None and field is not None:
+            mail[field.group(1).strip().lower().replace(" ", "_")] = field.group(2).strip()
+            continue
+        mail = None
+        event = _EVENT_LINE.match(line)
+        if event is not None:
+            title, start, event_id, link = event.groups()
+            items.append({"id": event_id, "summary": title, "start": start, **({"link": link} if link else {})})
+    return items
 
 
 def _item_key(source: str, item: Any) -> str:

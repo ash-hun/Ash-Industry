@@ -61,14 +61,20 @@ class XlsxAdapter:
     def _document(self, wb: Any, path: Path) -> Document:
         tables: list[Table] = []
         for si, ws in enumerate(wb.worksheets):
-            # 병합 범위의 왼쪽 위만 값이 있다. 나머지는 값이 없어 실리지 않는다
-            heads = {str(rng.start_cell.coordinate) for rng in ws.merged_cells.ranges}
+            # 병합 범위의 왼쪽 위만 값이 있다. 나머지는 값이 없어 실리지 않는다.
+            # 빈 병합 범위는 글을 적는 자리인 경우가 많아 왼쪽 위 칸을 빈 글로 싣는다
+            spans = {
+                str(rng.start_cell.coordinate): (rng.max_row - rng.min_row + 1, rng.max_col - rng.min_col + 1)
+                for rng in ws.merged_cells.ranges
+            }
             cells = tuple(
                 Cell(
-                    id=cell_id(si, c.row - 1, c.column - 1), row=c.row - 1, col=c.column - 1, text=str(c.value),
-                    address=c.coordinate, merged=c.coordinate in heads,
+                    id=cell_id(si, c.row - 1, c.column - 1), row=c.row - 1, col=c.column - 1,
+                    text="" if c.value is None else str(c.value), address=c.coordinate,
+                    merged=c.coordinate in spans, row_span=spans.get(c.coordinate, (1, 1))[0],
+                    col_span=spans.get(c.coordinate, (1, 1))[1],
                 )
-                for row in ws.iter_rows() for c in row if c.value is not None
+                for row in ws.iter_rows() for c in row if c.value is not None or c.coordinate in spans
             )
             tables.append(Table(
                 id=table_id(si), index=si, rows=ws.max_row, cols=ws.max_column, cells=cells, name=ws.title

@@ -36,6 +36,13 @@ class GoalStore:
         tmp.write_text(json.dumps(goal.model_dump(), ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self._path(goal.id))
 
+    def delete(self, goal_id: str) -> bool:
+        """지웠으면 True, 원래 없었으면 False. 두 번 불러도 결과 상태는 같다."""
+        path = self._path(goal_id)
+        existed = path.exists()
+        path.unlink(missing_ok=True)
+        return existed
+
     def ensure(self, goal: Goal) -> tuple[Goal, bool]:
         """없으면 저장하고 (goal, True). 이미 있으면 진행 기록을 지키려고 그대로 두고 (기존, False).
         끝났거나 멈춘 목표를 다시 맡기면 다시 진행한다."""

@@ -4,7 +4,10 @@ from docparse.template.template_schema import (
     TemplateField, TemplateSchema, TemplateValueError, render_value, check_locators, validate_values,
     scan_placeholders, schema_from_placeholders,
 )
-from docparse.parser_registry import SUPPORTED_SUFFIXES, apply, fill, inspect, render, to_html, output_suffix
+from docparse.parser_registry import (
+    SUPPORTED_SUFFIXES, apply, fill, render, inspect, to_html, place_tokens, output_suffix,
+)
+from docparse.create.document_builder import CREATE_SUFFIXES, Block, DocumentSpec, SheetSpec, SlideSpec, create
 from docparse.template.field_detect import FieldCandidate, detect_fields, suggest_template_id
 from docparse.document_model import Cell, Document, FormField, Paragraph, Run, Table
 from docparse.verify.verify_service import VerifyResult, verify_edit, verify_fill
@@ -12,10 +15,13 @@ from docparse.edit_plan import Change, EditPlan, Replacement, preview
 from docparse.render.render_service import RenderUnavailable
 
 __all__ = [
+    "CREATE_SUFFIXES",
     "SUPPORTED_SUFFIXES",
+    "Block",
     "Cell",
     "Change",
     "Document",
+    "DocumentSpec",
     "FieldCandidate",
     "FormField",
     "EditPlan",
@@ -23,6 +29,8 @@ __all__ = [
     "RenderUnavailable",
     "Replacement",
     "Run",
+    "SheetSpec",
+    "SlideSpec",
     "Table",
     "TemplateField",
     "TemplateSchema",
@@ -30,10 +38,12 @@ __all__ = [
     "VerifyResult",
     "apply",
     "check_locators",
+    "create",
     "detect_fields",
     "fill",
     "inspect",
     "output_suffix",
+    "place_tokens",
     "preview",
     "render",
     "render_value",

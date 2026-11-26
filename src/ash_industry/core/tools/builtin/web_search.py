@@ -15,13 +15,17 @@ DDG_USER_AGENT = "Mozilla/5.0 (compatible; ash-industry)"
 _DDG_TITLE = re.compile(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
 _DDG_SNIPPET = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
+# 기간 제한. Brave 는 freshness(pd, pw, pm, py), DuckDuckGo HTML 은 df(d, w, m, y)
+FRESHNESS = {"day": ("pd", "d"), "week": ("pw", "w"), "month": ("pm", "m"), "year": ("py", "y")}
 
 
 class WebSearchTool(AshTool):
     name = "web_search"
     description = (
         "Search the web for current information. "
-        "Use when you need up-to-date facts, news, or data not in your training knowledge."
+        "Use when you need up-to-date facts, news, or data not in your training knowledge. "
+        "Each result shows its source domain and, when known, its publish date. Snippets are leads, not proof: "
+        "open the page with web_fetch before stating a fact from it."
     )
     parameters = {
         "type": "object",
@@ -35,6 +39,11 @@ class WebSearchTool(AshTool):
                 "description": "Maximum number of results to return (default: 5)",
                 "default": 5,
             },
+            "freshness": {
+                "type": "string",
+                "enum": ["day", "week", "month", "year"],
+                "description": "Only results published within this period (omit for any time)",
+            },
         },
         "required": ["query"],
     }
@@ -43,9 +52,10 @@ class WebSearchTool(AshTool):
     async def execute(self, tool_call_id: str, params: dict[str, Any], signal: Any = None) -> ToolResultMessage:
         query = params["query"]
         max_results = int(params.get("max_results", 5))
+        freshness = params.get("freshness") if params.get("freshness") in FRESHNESS else None
 
         try:
-            results = await _search(query, max_results)
+            results = await _search(query, max_results, freshness)
             text = _format_results(query, results)
             return ToolResultMessage(
                 tool_call_id=tool_call_id,
@@ -61,19 +71,21 @@ class WebSearchTool(AshTool):
             )
 
 
-async def _search(query: str, max_results: int) -> list[dict[str, str]]:
+async def _search(query: str, max_results: int, freshness: str | None = None) -> list[dict[str, str]]:
     """Brave Search API 우선, 키 없으면 DuckDuckGo fallback."""
     from ash_industry.ash_config import get_settings
 
     settings = get_settings()
     if settings.web_search.brave_api_key:
         return await _search_brave(
-            query, max_results, settings.web_search.brave_api_key.get_secret_value()
+            query, max_results, settings.web_search.brave_api_key.get_secret_value(), freshness,
         )
-    return await _search_ddg(query, max_results)
+    return await _search_ddg(query, max_results, freshness)
 
 
-async def _search_brave(query: str, max_results: int, api_key: str) -> list[dict[str, str]]:
+async def _search_brave(
+    query: str, max_results: int, api_key: str, freshness: str | None = None,
+) -> list[dict[str, str]]:
     url = "https://api.search.brave.com/res/v1/web/search"
     headers = {
         "Accept": "application/json",
@@ -81,6 +93,8 @@ async def _search_brave(query: str, max_results: int, api_key: str) -> list[dict
         "X-Subscription-Token": api_key,
     }
     params: dict[str, Any] = {"q": query, "count": min(max_results, 20)}
+    if freshness:
+        params["freshness"] = FRESHNESS[freshness][0]
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(url, headers=headers, params=params)
@@ -92,18 +106,23 @@ async def _search_brave(query: str, max_results: int, api_key: str) -> list[dict
         results.append({
             "title": item.get("title", ""),
             "url": item.get("url", ""),
-            "snippet": item.get("description", ""),
+            "snippet": _clean(item.get("description", "")),
+            "date": str(item.get("page_age") or item.get("age") or "")[:10],
         })
     return results
 
 
-async def _search_ddg(query: str, max_results: int) -> list[dict[str, str]]:
-    """DuckDuckGo HTML 검색 결과. 비면 Instant Answers 로 한 번 더. 무료, 키 불필요."""
+async def _search_ddg(query: str, max_results: int, freshness: str | None = None) -> list[dict[str, str]]:
+    """DuckDuckGo HTML 검색 결과. 비면 Instant Answers 로 한 번 더. 무료, 키 불필요.
+    기간을 걸었으면 Instant Answers 로 넘기지 않는다(날짜를 모르는 백과 요약이라 기간을 지키지 못한다)."""
+    data = {"q": query, **({"df": FRESHNESS[freshness][1]} if freshness else {})}
     async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(DDG_HTML_URL, data={"q": query}, headers={"User-Agent": DDG_USER_AGENT})
+        response = await client.post(DDG_HTML_URL, data=data, headers={"User-Agent": DDG_USER_AGENT})
         response.raise_for_status()
     results = parse_ddg_html(response.text, max_results)
-    return results or await _search_ddg_instant(query, max_results)
+    if results or freshness:
+        return results
+    return await _search_ddg_instant(query, max_results)
 
 
 def parse_ddg_html(page: str, max_results: int) -> list[dict[str, str]]:
@@ -184,6 +203,8 @@ def _format_results(query: str, results: list[dict[str, str]]) -> str:
         lines.append(f"{i}. {r['title']}")
         if r["url"]:
             lines.append(f"   URL: {r['url']}")
+            source = ", ".join(x for x in (urlparse(r["url"]).hostname or "", r.get("date", "")) if x)
+            lines.append(f"   Source: {source}")
         if r["snippet"]:
             lines.append(f"   {r['snippet']}")
         lines.append("")

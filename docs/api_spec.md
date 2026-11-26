@@ -17,6 +17,8 @@
 1. [개요](#개요)
 2. [공통 규약](#공통-규약)
 3. [세부 API 명세](#세부-api-명세)
+   - [GET /api/auto-approve](#get-apiauto-approve)
+   - [PUT /api/auto-approve/{agent}](#put-apiauto-approveagent)
    - [GET /api/agents](#get-apiagents)
    - [GET /api/agenda](#get-apiagenda)
    - [GET /api/health](#get-apihealth)
@@ -43,6 +45,12 @@
    - [POST /api/restart](#post-apirestart)
    - [GET /api/slash-commands](#get-apislash-commands)
    - [GET /api/tools](#get-apitools)
+   - [POST /api/uploads](#post-apiuploads)
+   - [GET /api/docs/structure](#get-apidocsstructure)
+   - [POST /api/docs/plan](#post-apidocsplan)
+   - [POST /api/docs/apply](#post-apidocsapply)
+   - [GET /api/docs/fields](#get-apidocsfields)
+   - [POST /api/docs/templates](#post-apidocstemplates)
    - [GET /api/voice/phrases/{name}](#get-apivoicephrasesname)
    - [GET /api/workflow](#get-apiworkflow)
    - [GET /api/workflow/layout](#get-apiworkflowlayout)
@@ -96,6 +104,89 @@ Web HUD(`src/ash_industry/ui/web/static/`)가 쓰는 백엔드 인터페이스�
 ## 세부 API 명세
 
 경로 알파벳순.
+
+### GET /api/auto-approve
+
+최상위 에이전트마다 auto mode(승인 자동 허용)가 켜졌는지. HUD 입력 독의 AUTO 와 SET 의 AUTO MODE 카드가 받는다.
+
+#### Endpoint
+
+```
+GET /api/auto-approve
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `GET` |
+| 인증 | 설정 시 필요 |
+| 응답 Content-Type | `application/json` |
+
+#### Response Body
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `agents` | object[] | `{id, name, enabled}`. 순서는 `/api/agents` 와 같다 |
+
+#### 호출 예시
+
+```bash
+$ curl -s http://localhost:7777/api/auto-approve
+{"agents":[{"id":"main","name":"A.S.H.","enabled":false},{"id":"evi","name":"E.V.I.","enabled":true}]}
+```
+
+#### 특이사항
+
+**재호출**: 상태를 바꾸지 않는다.
+
+---
+
+### PUT /api/auto-approve/{agent}
+
+그 에이전트의 auto mode 를 켜거나 끈다. `~/.ash/auto_approve.yaml`(`ASH_SECURITY__AUTO_APPROVE_PATH`)에 저장하고 열린 세션도 다음 도구 호출부터 따른다. 켜진 에이전트는 승인 모달이 뜰 호출(`security.require_approval_for`, MCP ask)을 묻지 않고 실행한다. 위험 명령, MCP 정책 deny, 프로필 `never` 는 켜도 막힌다. 스케줄과 목표 같은 무인 실행에는 적용하지 않는다.
+
+#### Endpoint
+
+```
+PUT /api/auto-approve/{agent}
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `PUT` |
+| 인증 | 설정 시 필요 |
+| 요청 Content-Type | `application/json` |
+| 응답 Content-Type | `application/json` |
+
+#### Request Body
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `enabled` | boolean | 예 | 켤지. `"yes"` 같은 글은 받지 않는다(strict) |
+
+#### 응답 코드
+
+| 코드 | 의미 | 본문 |
+|---|---|---|
+| `200` | 저장함 | `GET` 과 같은 스키마 |
+| `404` | 모르는 에이전트 | `{"error": "unknown agent: <id>"}` |
+| `422` | `enabled` 가 bool 이 아니거나 모르는 필드 | FastAPI 검증 오류 |
+
+#### 호출 예시
+
+```bash
+$ curl -s -X PUT http://localhost:7777/api/auto-approve/evi -H 'Content-Type: application/json' -d '{"enabled":true}'
+{"agents":[{"id":"main","name":"A.S.H.","enabled":false},{"id":"evi","name":"E.V.I.","enabled":true}]}
+```
+
+#### 특이사항
+
+**재호출**: 같은 값을 다시 보내면 파일과 응답이 같다.
+
+---
 
 ### GET /api/agents
 
@@ -1738,7 +1829,232 @@ GET /api/docs/files/.render/출장신청서/출장신청서-1.png
 
 #### 특이사항
 
-**재호출**: 상태를 바꾸지 않는다. 백엔드는 문서 폴더에 쓰지 않는다(쓰기는 ash-mcp 의 docs 서버만). 같은 문서를 다시 렌더하면 같은 경로의 파일이 새 내용으로 바뀐다.
+**재호출**: 상태를 바꾸지 않는다. 백엔드는 문서 폴더에 쓰지 않는다(쓰기는 ash-mcp 의 docs 서버만. 예외는 채팅 첨부를 두는 `uploads/` 하나). 같은 문서를 다시 렌더하면 같은 경로의 파일이 새 내용으로 바뀐다.
+
+---
+
+### GET /api/docs/structure
+
+HUD 문서 창의 편집 보기가 문서 구조를 받는다. 백엔드가 docs MCP 의 `inspect_document(include_empty=true)` 를 불러 결과를 그대로 준다. 아래 다섯 엔드포인트(이것과 plan, apply, fields, templates)는 같은 규약을 따른다.
+
+- 호출 기록과 MCP 정책의 에이전트 이름은 `hud` 다.
+- 정책이 `deny` 면 403 이다. `ask` 는 사용자가 버튼을 누른 것을 승인으로 보고 부른다.
+- docs 서버가 설정에 없거나 답하지 않으면 503 이다(시간 제한은 그 서버 설정의 `timeout`).
+- 도구가 `error` 를 돌려주면 422 이고, 본문은 도구 결과 그대로다(`error`, 있으면 `issues`).
+- 입력 모양이 틀리면 docs 서버를 부르지 않고 422 다(FastAPI 검증 오류).
+
+#### Endpoint
+
+```
+GET /api/docs/structure?path=uploads/3f2a9c1d0b7e-출장신청서.docx
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `GET` |
+| 인증 | 설정 시 필요 |
+| 응답 Content-Type | `application/json` |
+
+#### Query 파라미터
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `path` | string | 예 | 문서 폴더 기준 상대 경로(500자까지). 폴더 밖과 숨김 이름은 docs 서버가 거절한다 |
+| `table` | string | 아니오 | 표 id(`t3`)나 시트 이름. 주면 그 표의 칸만 |
+| `offset` | integer | 아니오 | `table` 과 함께. 이 칸부터 2000개(기본 0) |
+
+#### Response Body
+
+`inspect_document` 결과. `path`, `format`, `paragraphs[{id, text, style?, readonly?}]`, `tables[{id, name?, anchor?, rows, cols, cells[{id, row, col, text, address?, row_span?, col_span?}]}]`(anchor 는 본문에서 표 앞에 오는 문단 수, DOCX 와 HWPX 만), 큰 문서는 `tables_omitted`, `truncated`, 나눠 읽을 때 `next_offset`.
+
+```json
+{"path": "uploads/3f2a9c1d0b7e-출장신청서.docx", "format": "docx",
+ "paragraphs": [{"id": "p0", "text": "출장 신청서", "style": "Title"}],
+ "tables": [{"id": "t0", "rows": 2, "cols": 2, "cells": [
+   {"id": "t0r0c0", "row": 0, "col": 0, "text": "성명"}, {"id": "t0r0c1", "row": 0, "col": 1, "text": ""}]}]}
+```
+
+#### 응답 코드
+
+| 코드 | 의미 | 본문 |
+|---|---|---|
+| `200` | 구조 | 위 |
+| `403` | MCP 정책이 막음 | `{"error": "MCP 정책이 막았다: ..."}` |
+| `422` | 입력 모양이 틀림, 또는 도구 오류(없는 파일, 지원하지 않는 형식) | 검증 오류, 또는 `{"error": "..."}` |
+| `503` | docs 서버가 없거나 답하지 않음 | `{"error": "docs MCP 서버가 설정에 없다"}` |
+
+#### 특이사항
+
+**재호출**: 상태를 바꾸지 않는다. 호출 기록(`~/.ash/mcp_audit`)에 한 줄씩 쌓인다.
+
+---
+
+### POST /api/docs/plan
+
+고친 곳을 저장하지 않고 미리 본다. docs MCP 의 `plan_edit`.
+
+#### Endpoint
+
+```
+POST /api/docs/plan
+```
+
+#### Request Body
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `path` | string | 예 | 문서 폴더 기준 상대 경로 |
+| `replacements` | array | 예 | 1개에서 200개. `{target, text}`. `target` 은 `p3`, `t0r1c2`, `t0r1c2p0`, `s1sh4p0` 꼴만, `text` 는 5000자까지 |
+
+```json
+{"path": "uploads/3f2a9c1d0b7e-출장신청서.docx", "replacements": [{"target": "t0r0c1", "text": "홍길동"}]}
+```
+
+#### Response Body
+
+```json
+{"plan_id": "9c1d0b7e3f2a", "path": "uploads/3f2a9c1d0b7e-출장신청서.docx", "ok": true, "issues": [],
+ "changes": [{"target": "t0r0c1", "before": "", "after": "홍길동"}]}
+```
+
+`ok` 가 거짓이면 `issues` 에 이유(없는 대상, 읽기 전용, 바뀌는 것이 없음)가 오고 적용할 수 없다. 응답 코드는 structure 와 같다.
+
+#### 특이사항
+
+**재호출**: 같은 원본과 같은 계획이면 같은 `plan_id` 다(원본 크기와 수정 시각을 섞는다). 파일을 쓰지 않는다.
+
+---
+
+### POST /api/docs/apply
+
+미리 본 계획을 적용해 원본 옆 새 파일(`.edited-<시각>`)로 저장한다. docs MCP 의 `apply_edit`. 이 버튼 누름이 사람의 승인이다.
+
+#### Endpoint
+
+```
+POST /api/docs/apply
+```
+
+#### Request Body
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `plan_id` | string | 예 | 소문자 16진수 12자 |
+
+#### Response Body
+
+`apply_edit` 결과(`plan_id`, `source`, `output`, `verify`, `changes`, `preview`)에 더해, 미리보기 렌더가 있으면 `document`(문서 첨부 `{kind: "document", path, title, store: "docs", pages, source}`)를 싣는다. 화면은 이것을 문서 창에 띄운다.
+
+#### 특이사항
+
+**재호출**: 같은 `plan_id` 를 다시 보내면 docs 서버가 처음 결과를 그대로 돌려준다(새 파일을 더 만들지 않는다). 계획을 세운 뒤 원본이 바뀌었으면 422.
+
+---
+
+### GET /api/docs/fields
+
+빈 양식의 채울 자리 후보. docs MCP 의 `detect_fields`. 저장하지 않는다.
+
+#### Endpoint
+
+```
+GET /api/docs/fields?path=uploads/3f2a9c1d0b7e-출장신청서.docx
+```
+
+#### Response Body
+
+`{template_id, format, candidates[{name, label, type, required, options, locator, rule, confidence}], truncated?}`
+
+#### 특이사항
+
+**재호출**: 같은 문서면 같은 목록과 순서. 상태를 바꾸지 않는다.
+
+---
+
+### POST /api/docs/templates
+
+화면의 양식 등록 표에서 고른 필드로 빈 양식을 등록한다. docs MCP 의 `register_template(kind=blank_form)`.
+
+#### Endpoint
+
+```
+POST /api/docs/templates
+```
+
+#### Request Body
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `path` | string | 예 | 원본 문서 |
+| `template_id` | string | 예 | 한글, 영문, 숫자, `-`, `_` 64자까지 |
+| `fields` | array | 예 | 1개에서 200개. `{name, type, required, options, locator}`. 모양은 docs 서버가 검사한다 |
+
+#### Response Body
+
+`{template_id, format, kind, source, fields, registered}`. 자리를 문서에서 찾지 못하면 422 와 `{"error", "issues"}`.
+
+#### 특이사항
+
+**재호출**: 같은 id 와 같은 원본이면 있던 것을 돌려주고 `registered: false`. 같은 id 가 다른 원본으로 있으면 422(새 버전 id 를 쓴다).
+
+---
+
+### POST /api/uploads
+
+채팅 첨부파일 하나를 `uploads/<내용 sha256 앞 12자>-<정리한 이름>` 에 저장한다. 형식은 가리지 않는다. HUD 입력창의 📎 와 끌어다 놓기가 부르고, 받은 `id` 를 ws `user_message.attachments` 에 넣는다. compose 는 호스트 임시 폴더(`ASH_UPLOAD_DIR`, 기본 `/tmp/ash-uploads`)를 백엔드와 ash-mcp 의 `/data/documents/uploads` 에 붙인다. 마지막으로 올린 뒤 `ASH_DOCS__UPLOAD_TTL_HOURS`(기본 24)시간이 지나면 지운다(올릴 때마다, 기동 때, 1시간마다 확인).
+
+#### Endpoint
+
+```
+POST /api/uploads
+```
+
+#### 호출 규약
+
+| 항목 | 값 |
+|---|---|
+| Method | `POST` |
+| 인증 | 설정 시 필요 |
+| 요청 Content-Type | `multipart/form-data` |
+| 응답 Content-Type | `application/json` |
+
+#### Request Body
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `file` | file | 예 | 올릴 파일 하나. 50MB 까지. 이름은 경로 부분을 버리고 글자, 숫자, `.`, `-`, `_`, 한글 밖의 글자를 `_` 로 바꾼다 |
+
+#### Response Body
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `id` | string | 내용 sha256 앞 12자. 같은 내용이면 같다 |
+| `name` | string | 정리한 이름 |
+| `path` | string | 문서 폴더 기준 상대 경로(`uploads/<id>-<name>`). Evi 문서 도구에 그대로 넘긴다 |
+| `size` | integer | 바이트 |
+| `mime` | string | 브라우저가 준 형식, 없거나 `application/octet-stream` 이면 이름으로 짐작 |
+| `kind` | string | `image`, `audio`, `video`, `document`(DOCX, XLSX, PPTX, HWP(X), PDF, TXT, CSV), `other` |
+
+#### 응답 코드
+
+| 코드 | 의미 | 본문 |
+|---|---|---|
+| `200` | 저장함(또는 이미 있음) | 위 스키마 |
+| `413` | 50MB 초과. 받는 도중 넘으면 그때 끊는다 | `{"error": "파일이 너무 크다(최대 52,428,800바이트)"}` |
+| `422` | `file` 이 없다 | FastAPI 검증 오류 |
+
+#### 호출 예시
+
+```bash
+$ curl -s -F 'file=@출장신청서.hwpx' http://localhost:7777/api/uploads
+{"id":"3f2a9c1d0b7e","name":"출장신청서.hwpx","path":"uploads/3f2a9c1d0b7e-출장신청서.hwpx","size":48213,"mime":"application/octet-stream","kind":"document"}
+```
+
+#### 특이사항
+
+**재호출**: 같은 파일을 다시 올리면 같은 응답이고 파일을 더 만들지 않는다(이름이 내용 해시로 정해진다). 대신 보관 기한을 지금부터 다시 센다. 이름만 다르고 내용이 같으면 새 이름으로 하나 더 생긴다. 지우는 API 는 없다(기한이 지나면 저절로 지워진다).
 
 ---
 
@@ -1993,28 +2309,30 @@ GET /api/mcp/policy
 
 | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|---|---|---|
-| 없음 | | | | | |
+| `agent` | query | string | 아니오 | `main` | `effective` 를 계산할 에이전트 id(`^[a-z0-9][a-z0-9_-]{0,39}$`). 정책의 `agents.<id>` 가 없으면 에이전트 제한 없이 판정 |
 
 #### Response Body
 
 | 필드 | 타입 | 널 허용 | 설명 |
 |---|---|---|---|
 | `enabled` | boolean | 아니오 | `mcp_servers` 가 있어 정책 문이 있는지. false 면 `tools` 는 빈 배열, `path` 는 빈 문자열 |
+| `agent` | string | 아니오 | `effective` 를 계산한 에이전트 id(쿼리 그대로) |
 | `path` | string | 아니오 | 정책 파일 경로(`security.mcp_policy_path`) |
 | `policy` | object | 아니오 | `{defaults: {read, write, unknown}, servers: {<서버>: {lock?, tools: {<도구>: {mode?, lock?, calls_per_hour?}}}}, agents: {<에이전트>: {servers?, deny?}}}`. `mode` 는 `allow`, `ask`, `deny`. `lock` 은 `{인자: [허용 값]}`, 서버 `lock` 은 모든 도구에 |
-| `tools` | object[] | 아니오 | 붙은 MCP 도구마다 `{server, name, kind, effective, description}`. `kind` 는 `read`, `write`, `unknown`, `effective` 는 인자 없이 본 지금 판정 |
+| `tools` | object[] | 아니오 | 붙은 MCP 도구마다 `{server, name, kind, effective, description}`. `kind` 는 `read`, `write`, `unknown`, `effective` 는 `agent` 가 인자 없이 부를 때의 판정 |
 
 #### 응답 코드
 
 | 코드 | 의미 | 본문 |
 |---|---|---|
 | `200` | 정상 | 위 스키마 |
+| `422` | `agent` 형식이 틀림 | FastAPI 검증 오류 |
 
 #### 호출 예시
 
 ```bash
-$ curl -s http://localhost:7777/api/mcp/policy
-{"path":"/root/.ash/mcp_policy.yaml","policy":{"defaults":{"read":"allow","write":"ask","unknown":"ask"},"servers":{},"agents":{}},"tools":[{"server":"google","name":"send_gmail_message","kind":"write","effective":"ask","description":"메일 보내기"}],"enabled":true}
+$ curl -s 'http://localhost:7777/api/mcp/policy?agent=main'
+{"path":"/root/.ash/mcp_policy.yaml","agent":"main","policy":{"defaults":{"read":"allow","write":"ask","unknown":"ask"},"servers":{},"agents":{}},"tools":[{"server":"google","name":"send_gmail_message","kind":"write","effective":"ask","description":"메일 보내기"}],"enabled":true}
 ```
 
 #### 특이사항
@@ -2057,7 +2375,7 @@ PUT /api/mcp/policy
 
 | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|---|---|---|
-| 없음 | | | | | |
+| `agent` | query | string | 아니오 | `main` | `effective` 를 계산할 에이전트 id(`^[a-z0-9][a-z0-9_-]{0,39}$`). 정책의 `agents.<id>` 가 없으면 에이전트 제한 없이 판정 |
 
 #### Response Body
 
@@ -2069,14 +2387,14 @@ PUT /api/mcp/policy
 |---|---|---|
 | `200` | 저장하고 적용함 | `GET` 과 같은 스키마 |
 | `404` | `mcp_servers` 가 없어 정책 문이 없다 | `{"error": "..."}` |
-| `422` | 모르는 `mode`, 범위 밖 `calls_per_hour`, 모르는 필드 | FastAPI 검증 오류 |
+| `422` | 모르는 `mode`, 범위 밖 `calls_per_hour`, 모르는 필드, 형식이 틀린 `agent` | FastAPI 검증 오류 |
 
 #### 호출 예시
 
 ```bash
 $ curl -s -X PUT http://localhost:7777/api/mcp/policy -H 'Content-Type: application/json' \
     -d '{"servers":{"google":{"tools":{"send_gmail_message":{"mode":"ask","lock":{"to":["me@example.com"]}}}}}}'
-{"path":"/root/.ash/mcp_policy.yaml","policy":{"defaults":{"read":"allow","write":"ask","unknown":"ask"},"servers":{"google":{"tools":{"send_gmail_message":{"lock":{"to":["me@example.com"]},"mode":"ask"}}}},"agents":{}},"tools":[...],"enabled":true}
+{"path":"/root/.ash/mcp_policy.yaml","agent":"main","policy":{"defaults":{"read":"allow","write":"ask","unknown":"ask"},"servers":{"google":{"tools":{"send_gmail_message":{"lock":{"to":["me@example.com"]},"mode":"ask"}}}},"agents":{}},"tools":[...],"enabled":true}
 ```
 
 #### 특이사항
@@ -2278,7 +2596,7 @@ GET /ws?session_id=<id>&agent=<agent_id>&token=<key>   (Upgrade: websocket)
 
 | `type` | 필드 | 동작 |
 |---|---|---|
-| `user_message` | `text`, `id?` | 그 세션이 답하는 중이면 턴을 시작하지 않고 대기열에 담는다(`queue_changed`). 대기 중인 말은 그 턴의 도구 결과를 받은 직후 같은 턴의 사용자 메시지로 붙거나(`queue_delivered`), 턴이 끝나면 보낸 순서대로 빈 줄로 이어 다음 턴이 된다. `id`(영숫자와 `-`, 64자 이하, 아니면 서버가 만든다)가 같은 말은 한 번만 담긴다. 대화는 한가한데 그 세션에 뒤에서 도는 작업이 있으면 작은 모델이 그 작업에 대한 지시인지 가르고, 지시면 그 작업의 대기열로 보내며 `queue_delivered` 와 선응답 `proactive_message{kind:"filler"}`, `background_tasks`(그 작업의 `pending`)를 보낸다. 화면이 `id` 를 붙여 보냈는데 그 사이 턴이 끝나 바로 돌았으면 이 연결에 `queue_delivered` 를 보낸다. 슬래시 명령이면 디스패처가 처리하고 결과를 `agent_start`, `stream_delta`, `agent_end` 로 돌려준다. 남는 텍스트는 에이전트 프롬프트로. 비어 있으면 무시. `/focus` 로 시작하면 디스패처보다 먼저 Focus 가 받는다([Focus](#focus)) |
+| `user_message` | `text`, `id?`, `attachments?` | `attachments` 는 `POST /api/uploads` 의 `id` 목록(10개까지, 모르는 id 는 버린다). 있으면 `text` 가 비어도 보내고, 메시지 끝에 첨부마다 `[첨부] <이름> | 경로 <path>(문서 폴더 기준) | <kind> | <크기>바이트` 줄이 붙어 기록에도 남는다. png, jpeg, webp, gif 이고 5MB 이하인 이미지는 이번 턴 모델 호출에 그림으로도 붙는다(기록에는 글만. Ollama, vLLM 은 그림을 받지 않는다). 대기열이나 뒤에서 도는 작업으로 간 말에는 그림이 빠지고 안내 줄만 간다. 그 세션이 답하는 중이면 턴을 시작하지 않고 대기열에 담는다(`queue_changed`). 대기 중인 말은 그 턴의 도구 결과를 받은 직후 같은 턴의 사용자 메시지로 붙거나(`queue_delivered`), 턴이 끝나면 보낸 순서대로 빈 줄로 이어 다음 턴이 된다. `id`(영숫자와 `-`, 64자 이하, 아니면 서버가 만든다)가 같은 말은 한 번만 담긴다. 대화는 한가한데 그 세션에 뒤에서 도는 작업이 있으면 작은 모델이 그 작업에 대한 지시인지 가르고, 지시면 그 작업의 대기열로 보내며 `queue_delivered` 와 선응답 `proactive_message{kind:"filler"}`, `background_tasks`(그 작업의 `pending`)를 보낸다. 화면이 `id` 를 붙여 보냈는데 그 사이 턴이 끝나 바로 돌았으면 이 연결에 `queue_delivered` 를 보낸다. 슬래시 명령이면 디스패처가 처리하고 결과를 `agent_start`, `stream_delta`, `agent_end` 로 돌려준다. 남는 텍스트는 에이전트 프롬프트로. 비어 있으면 무시. `/focus` 로 시작하면 디스패처보다 먼저 Focus 가 받는다([Focus](#focus)) |
 | `approval_response` | `id`, `approved`, `always` | `approval_request` 에 대한 답. 같은 `id` 에 먼저 온 답만 쓰고 나머지는 버린다. `always=true` 는 `approved=true` 일 때만 의미 있고 제안된 패턴을 세션 에이전트의 규칙 파일(`approvals/<agent_id>.yaml`)에 남긴다 |
 | `proactive_feedback` | `id`, `accepted` | 🔔 에 대한 수락/무시. 임계치 학습기에 반영. 한 연결에서 같은 `id` 는 처음 한 번만 반영. Web HUD 는 더 보내지 않는다(서버가 다음 `user_message` 로 학습). 옛 화면을 위해 받는다. 이걸 받으면 다음 말로 다시 학습하지 않는다 |
 | `reply_classify` | `kind`(`feedback`/`approval`), `id`, `text`, `context`, `has_always` | 키워드로 판정이 안 되는 짧은 답을 사고 모델로 분류. `feedback` 이면 `id` 는 🔔 의 `message_id`, `context` 는 🔔 본문. `approval` 이면 `id` 는 승인 요청 id, `context` 는 명령, `has_always` 는 항상 허용 패턴이 있는지. 결과는 `reply_classified`. 🔔 가 `accept`/`dismiss` 로 판정되면 서버가 바로 학습기에 반영한다(같은 `id` 는 한 번만). 승인은 판정만 돌려주고 승인 자체는 화면이 `approval_response` 로 보낸다 |
@@ -2301,7 +2619,7 @@ GET /ws?session_id=<id>&agent=<agent_id>&token=<key>   (Upgrade: websocket)
 | `message_update` | `text_delta`, `thinking_delta`, `timestamp` | 스트리밍 조각 |
 | `stream_delta` | `text` | 슬래시 명령 결과 등 비스트림 텍스트 |
 | `tool_execution_start` | `tool_call_id`, `tool_name`, `args`(object), `timestamp` | 도구 실행 시작 |
-| `tool_execution_end` | `tool_call_id`, `tool_name`, `is_error`, `artifacts[]`, `timestamp` | 도구 실행 끝. `artifacts` 는 도구가 만든 결과물 `{kind: video\|audio\|image\|file\|document, path, title, store, pages[]}`. MCP 서버 `media` 의 결과 JSON(`output`, `video`, `audio`, `stems` 값)에서 모으고(`store: creative`), 서버 `docs` 의 `render_document` png, pdf 결과는 문서 하나(`kind: document`, `store: docs`, `title` 은 원본 파일 이름, `pages` 는 `.render/` 아래 쪽 그림이나 PDF, 60개까지)로 만든다. HUD 는 문서, 영상, 음악, 이미지 순으로 하나를 모달로 띄우고 파일은 `GET /api/creative/files/{path}` 나 `GET /api/docs/files/{path}` 로 받는다 |
+| `tool_execution_end` | `tool_call_id`, `tool_name`, `is_error`, `artifacts[]`, `timestamp` | 도구 실행 끝. `artifacts` 는 도구가 만든 결과물 `{kind: video\|audio\|image\|file\|document, path, title, store, pages[], source}`(`source` 는 문서가 그린 원본 경로, 다른 결과물은 빈 글). MCP 서버 `media` 의 결과 JSON(`output`, `video`, `audio`, `stems` 값)에서 모으고(`store: creative`), 서버 `docs` 의 `render_document` png, pdf 결과는 문서 하나(`kind: document`, `store: docs`, `title` 은 원본 파일 이름, `pages` 는 `.render/` 아래 쪽 그림이나 PDF, 60개까지)로 만든다. HUD 는 문서, 영상, 음악, 이미지 순으로 하나를 모달로 띄우고 파일은 `GET /api/creative/files/{path}` 나 `GET /api/docs/files/{path}` 로 받는다 |
 | `agent_end` | `session_id`, `final_message`, `turns`, `agent_name`, `timestamp`, `continues?` | 루프 끝. `final_message` 는 마지막 assistant 메시지(`role`, `content[]`, `provider`, `model`, `usage{input, output, cache_read, cache_write}`, `stop_reason`, `error_message`, `timestamp`)이고 null 일 수 있다. 루트면 입력을 다시 받는다. `continues: true` 는 `/focus` 안내 뒤 메인 에이전트가 이어 돈다는 뜻이라, 화면은 입력 잠금과 음성 요청 표시를 그대로 둔다 |
 | `agent_error` | `message`, `code`, `timestamp` | 모델 스트림이 오류를 냈다. `code` 는 지금 늘 null |
 | `inner_thought` | `session_id`, `interpretation`, `decision`(기본 `silent`), `confidence`(0~1), `frame`(사고 프레임 전체), `timestamp` | 요청 시점과 성찰 시점의 사고 1회 |
@@ -2319,6 +2637,9 @@ GET /ws?session_id=<id>&agent=<agent_id>&token=<key>   (Upgrade: websocket)
 | `approval_waiting` | `waiting[]{session_id, agent, count}` | 어느 세션이든 기다리는 승인 요청 수가 바뀔 때 열린 연결 전부에 목록 전체를 보낸다. 쌓아 두지 않는다. 화면은 지금 세션이 아닌 항목을 "승인 대기 · 이동" 띠로 보인다 |
 | `queue_changed` | `session_id`, `items[]{id, text}` | 그 세션의 대기열 전체. 담거나 되가져올 때, 다음 턴으로 넘길 때. 화면은 받은 것으로 덮어쓴다 |
 | `queue_delivered` | `session_id`, `items[]{id, text}`, `timestamp` | 대기 말이 모델에게 건네졌다(같은 턴의 도구 결과 뒤, 또는 다음 턴). 화면은 그 자리에 사용자 말로 붙인다. 진행 중인 턴의 재생(`in_flight`)에도 들어간다 |
+| `artifacts` | `session_id`, `tool_name`, `artifacts[]{kind, path, title, store, pages}`, `timestamp` | 뒤로 넘긴 턴(선응답 뒤 이어 도는 턴)의 도구가 결과물을 만들었다. 그 턴의 `tool_execution_end` 는 화면에 오지 않아 결과물만 따로 낸다. 화면은 이것을 직접 띄우지 않고 아래 `artifacts_ready` 로 받는다 |
+| `artifacts_ready` | `session_id`, `agent`, `artifacts[]{kind, path, title, store, pages}` | 열린 HUD 전부에 보낸다(SessionRelay). 어느 세션, 어느 에이전트의 도구가 만든 결과물이든(오류 없는 `tool_execution_end.artifacts`, `artifacts`) 사용자가 어느 화면에 있든 결과물 창(문서 창, 플레이어)을 띄운다. 맡긴 쪽과 맡은 쪽이 같은 결과물을 차례로 내므로 같은 `store:path` 는 20초 안에 한 번만 보낸다 |
+| `session_message` | `session_id`, `agent`, `kind`(`proactive` \| `answer`), `text` | 열린 HUD 전부에 보낸다. 먼저 건넨 말과 뒤에서 끝난 답. 에이전트끼리의 대화 세션(`peer-`)과 대기 안내(`filler`)는 보내지 않는다. 화면은 지금 보는 세션 것은 `proactive_message` 로 이미 받았으니 버리고, 다른 세션 것은 활동 줄과 안 읽음 점으로 알린다 |
 | `queue_taken` | `items[]{id, text}` | `queue_take` 의 답. 이 연결에만 |
 | `background_tasks` | `tasks[]{task_id, session_id, agent, label, pending, applied}`, `done`(`{task_id, ok, stopped}` 또는 null) | 어느 세션이든 선응답으로 닫고 뒤에서 이어 도는 턴이 생기거나 끝날 때 열린 연결 전부에 목록 전체를 보낸다. 쌓아 두지 않는다. `done` 은 방금 끝난 작업. `label` 은 요청 앞 60자 |
 | `background_task` | `session_id`, `task_id`, `label`, `state`(`started`/`updated`/`finished`), `ok`, `error`, `pending`(아직 읽지 않은 지시), `applied`(읽어 반영한 지시), `stopped` | 그 세션을 연 연결에만 오는 같은 사실. 화면은 `background_tasks` 를 쓰고 이것은 무시한다 |

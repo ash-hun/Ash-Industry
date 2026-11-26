@@ -1,4 +1,4 @@
-"""[core] 대화 중에 맡긴 목표를 기록하고 스케줄러에 차례를 거는 goal 도구(맡기기, 목록, 멈추기)."""
+"""[core] 대화 중에 맡긴 목표를 기록하고 스케줄러에 차례를 거는 goal 도구(맡기기, 목록, 멈추기, 지우기)."""
 
 import re
 import asyncio
@@ -21,13 +21,14 @@ TOOL_DESCRIPTION = (
     "사용자가 계속 맡기는 일('앞으로 ~만 알려줘', '~ 나오면 알려줘', '~ 계속 챙겨줘')을 목표로 맡는다."
     " 맡으면 대화가 없는 동안에도 정해진 때마다 한 단계씩 진행하고, 목표가 알리라고 한 것만 대화로 알린다."
     " 한 번만 하면 되는 일이나 정한 시각의 알림은 이 도구가 아니라 schedule 이다."
-    " 같은 목표를 다시 맡겨도 하나로 남는다. action: set(맡기기), list(목록), stop(멈추기)."
+    " 같은 목표를 다시 맡겨도 하나로 남는다. action: set(맡기기), list(목록), stop(멈추기, 다시 맡기면 이어서 진행),"
+    " delete(지우기, 진행 기록과 알린 항목까지 없앤다. 사용자가 지우라고 할 때만)."
 )
 TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": ["set", "list", "stop"]},
-        "text": {"type": "string", "description": "목표 문장. 사용자가 말한 그대로. set, stop 에 쓴다"},
+        "action": {"type": "string", "enum": ["set", "list", "stop", "delete"]},
+        "text": {"type": "string", "description": "목표 문장. 사용자가 말한 그대로. set, stop, delete 에 쓴다"},
         "schedule": {"type": "string", "description": f"진행할 때(cron). 비우면 {DEFAULT_SCHEDULE}(9~21시 매시)"},
     },
     "required": ["action"],
@@ -100,6 +101,8 @@ class GoalTool(AshTool):
             return _result(tool_call_id, self.set_goal(agent, text, str(params.get("schedule") or DEFAULT_SCHEDULE)))
         if action == "stop":
             return _result(tool_call_id, self.stop_goal(agent, text))
+        if action == "delete":
+            return _result(tool_call_id, self.delete_goal(agent, text))
         return _result(tool_call_id, f"모르는 action: {action}", True)
 
     def set_goal(self, agent: str, text: str, schedule: str = DEFAULT_SCHEDULE) -> str:
@@ -122,15 +125,26 @@ class GoalTool(AshTool):
             " 이번 답에서는 다른 도구를 부르지 말고 맡았다고만 짧게 답한다"
         )
 
-    def stop_goal(self, agent: str, text: str) -> str:
-        goal = self._store.get(goal_key(agent, text)) or next(
-            (g for g in self._store.list(agent) if g.status == "active" and text in g.text), None
+    def _find(self, agent: str, text: str, active_only: bool) -> Goal | None:
+        return self._store.get(goal_key(agent, text)) or next(
+            (g for g in self._store.list(agent) if (g.status == "active" or not active_only) and text in g.text), None
         )
+
+    def stop_goal(self, agent: str, text: str) -> str:
+        goal = self._find(agent, text, active_only=True)
         if goal is None:
             return f"맡은 목표 중에 없다: {text}"
         self._store.save(goal.model_copy(update={"status": "paused"}))
         self._scheduler.set_enabled(goal.task_name, False)
         return f"목표를 멈췄다: {goal.text}"
+
+    def delete_goal(self, agent: str, text: str) -> str:
+        goal = self._find(agent, text, active_only=False)
+        if goal is None:
+            return f"맡은 목표 중에 없다: {text}"
+        self._scheduler.remove_task(goal.task_name)
+        self._store.delete(goal.id)
+        return f"목표를 지웠다: {goal.text}"
 
     def list_goals(self, agent: str) -> str:
         goals = self._store.list(agent)

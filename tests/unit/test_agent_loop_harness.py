@@ -353,3 +353,16 @@ async def test_reinforce_gets_overflow_when_loop_ran_past_max_turns(repo, max_tu
     await _harness(model, repo, memory, loop_config=AgentLoopConfig(max_turns=max_turns)).run("요청", executor)
 
     assert memory.overflow is overflow
+
+
+def test_with_images_adds_pictures_to_the_last_user_message_only():
+    from ash_industry.model_layer.model_types import ImageContent, TextContent, UserMessage
+    from ash_industry.agent_layer.harness import with_images
+
+    first, last = UserMessage(content="앞"), UserMessage(content="이거 봐")
+    image = ImageContent(data="aGk=", mime_type="image/png")
+    out = with_images([first, last], [image])
+
+    assert out[0] is first and last.content == "이거 봐"
+    assert out[1].content == [TextContent(text="이거 봐"), image]
+    assert with_images([], [image]) == []

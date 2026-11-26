@@ -24,7 +24,6 @@ class ProviderRegistry:
 
 def build_default_registry() -> ProviderRegistry:
     from ash_industry.model_layer.providers.anthropic import AnthropicProvider
-    from ash_industry.model_layer.providers.gemini import GeminiProvider
     from ash_industry.model_layer.providers.ollama import OllamaProvider
     from ash_industry.model_layer.providers.openai import OpenAIProvider
     from ash_industry.model_layer.providers.vllm import VLLMProvider
@@ -34,7 +33,6 @@ def build_default_registry() -> ProviderRegistry:
     registry.register(OpenAIProvider())
     registry.register(OllamaProvider())
     registry.register(VLLMProvider())
-    registry.register(GeminiProvider())
     return registry
 
 

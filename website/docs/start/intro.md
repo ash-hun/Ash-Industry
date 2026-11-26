@@ -25,7 +25,7 @@ Ash Industry 는 여러 AI 에이전트를 한 곳에서 띄우고 운영하는 
 
 ## 이런 분께 추천한다
 
-- 로컬 모델(Ollama, vLLM)과 클라우드 모델(Anthropic, OpenAI, Gemini)을 바꿔 가며 쓰고 싶은 개인
+- 로컬 모델(Ollama, vLLM)과 클라우드 모델(Anthropic, OpenAI)을 바꿔 가며 쓰고 싶은 개인
 - 파일, 셸, 웹 검색을 도구로 쓰는 에이전트가 필요하지만, 위험한 명령은 사람이 승인하길 바라는 개발자
 - DOCX, XLSX, HWPX 행정문서를 서식 그대로 고치거나 자주 쓰는 양식을 값만 말해 채우고 싶은 사람([Document Tools](../concepts/conversation/documents.md))
 - 스케줄 알림, 약속 추적, 맡겨 두면 알아서 챙기는 목표, 먼저 말을 거는 비서가 필요한 사람

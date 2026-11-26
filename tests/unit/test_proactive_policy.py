@@ -198,12 +198,26 @@ def test_decide_proactive_awaiting_reply_blocks_even_after_cooldown():
     idle = policy.check_awaiting("s1")
     policy.decide_proactive(ASK, session_id="s1")
 
-    clock.t += 3600
+    clock.t += 1000
     blocked = policy.decide_proactive(ASK, session_id="s1")
 
     assert idle is None
     assert blocked.speak is False and blocked.reason == "awaiting reply"
     assert policy.decide_proactive(ASK, session_id="s2").speak is True
+
+
+def test_awaiting_expires_after_long_silence():
+    clock = _Clock()
+    policy = _policy(clock, cooldown_sec=0, awaiting_expire_sec=1800)
+    policy.decide_proactive(ASK, session_id="s1")
+
+    clock.t += 1799
+    still = policy.check_awaiting("s1")
+    clock.t += 1
+
+    assert still is not None and policy.check_awaiting("s1") is None
+    assert policy.check_awaiting("s1") is None
+    assert policy.decide_proactive(ASK, session_id="s1").speak is True
 
 
 def test_note_user_activity_releases_gate_idempotently():

@@ -121,7 +121,7 @@ flowchart TB
     OPENLOOP["openloop/  usermodel/  journal/  session/"]
   end
   subgraph MODEL["model_layer/  LLM 추상화"]
-    PROVIDERS["providers/  anthropic, openai, gemini, ollama, vllm"]
+    PROVIDERS["providers/  anthropic, openai, ollama, vllm"]
     STREAM["stream.py  model_types.py  embeddings.py  decision.py"]
   end
   MEMORY["memory/  MemoryService, 작업 기억, 장기 기억, 회상, 통합"]
@@ -236,7 +236,7 @@ flowchart LR
     LOOP[agent loop<br/>loop.py]
   end
   subgraph MODEL[model_layer]
-    PROV[providers<br/>anthropic, openai, gemini, ollama, vllm]
+    PROV[providers<br/>anthropic, openai, ollama, vllm]
   end
   REPO[(세션 저장소<br/>jsonl, Postgres)]
   DESK -. HUD 를 띄움 .-> HUD

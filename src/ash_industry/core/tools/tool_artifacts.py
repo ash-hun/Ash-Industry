@@ -3,6 +3,7 @@
 import json
 from typing import Any, Literal
 from pathlib import PurePosixPath
+from contextvars import ContextVar
 
 from ash_industry.model_layer.model_types import Artifact
 
@@ -16,6 +17,19 @@ MAX_ARTIFACTS = 6
 RENDER_PREFIX = ".render/"
 DOCUMENT_PAGES = (".png", ".pdf")
 MAX_PAGES = 60
+
+# 맡긴 턴 동안 받는 쪽 도구가 만든 첨부를 모으는 곳. ask_agent 가 열고 결과에 실어 부른 쪽 화면으로 올린다
+peer_artifacts: ContextVar["list[Artifact] | None"] = ContextVar("ash_peer_artifacts", default=None)
+
+
+def collect_peer_artifacts(artifacts: "list[Artifact]") -> None:
+    """맡은 턴 안이면 첨부를 모은다. 아니면 아무것도 하지 않는다.
+
+    양식 등록 창(form)은 모으지 않는다. 받는 쪽 도구가 끝날 때 이미 열렸고, 다시 올리면 닫은 창이 또 열린다.
+    """
+    sink = peer_artifacts.get()
+    if sink is not None:
+        sink.extend(a for a in artifacts if a.kind != "form")
 
 
 Kind = Literal["video", "audio", "image"]
@@ -80,12 +94,39 @@ def _render_file(path: Any) -> bool:
 
 
 def document_artifacts(text: str) -> list[Artifact]:
-    """render_document 의 png, pdf 결과를 문서 하나로. 쪽은 받은 순서 그대로, html 과 오류는 빈 목록. 순수 함수."""
+    """render_document 의 png, pdf 결과나 쓰기 도구(apply_edit, fill_template, create_document)의 preview 를
+    문서 하나로. 쪽은 받은 순서 그대로, html 과 오류는 빈 목록. 순수 함수."""
     try:
         data = json.loads(text)
     except (TypeError, ValueError):
         return []
-    if not isinstance(data, dict) or data.get("format") not in ("png", "pdf"):
+    if not isinstance(data, dict):
+        return []
+    preview = data.get("preview")
+    return _rendered_document(preview if isinstance(preview, dict) else data)
+
+
+def form_artifacts(text: str) -> list[Artifact]:
+    """detect_fields 결과(path, template_id, candidates)를 양식 등록 창 하나로. 후보가 없으면 빈 목록. 순수 함수."""
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, dict) or not data.get("candidates") or not data.get("template_id"):
+        return []
+    path = data.get("path")
+    if not isinstance(path, str) or not path or ".." in PurePosixPath(path).parts:
+        return []
+    return [Artifact(kind="form", path=path, title=PurePosixPath(path).name, store="docs", source=path)]
+
+
+def docs_artifacts(text: str) -> list[Artifact]:
+    """docs 서버 결과에서 화면이 띄울 것. 렌더한 문서나 양식 등록 창. 순수 함수."""
+    return document_artifacts(text) or form_artifacts(text)
+
+
+def _rendered_document(data: dict[str, Any]) -> list[Artifact]:
+    if data.get("format") not in ("png", "pdf"):
         return []
     files = data.get("files")
     if not isinstance(files, list):
@@ -93,6 +134,7 @@ def document_artifacts(text: str) -> list[Artifact]:
     pages = [f for f in files if _render_file(f)][:MAX_PAGES]
     if not pages:
         return []
-    source = data.get("path")
-    title = PurePosixPath(source).name if isinstance(source, str) and source else PurePosixPath(pages[0]).name
-    return [Artifact(kind="document", path=pages[0], title=title, store="docs", pages=pages)]
+    raw = data.get("path")
+    source = raw if isinstance(raw, str) and raw and ".." not in PurePosixPath(raw).parts else ""
+    title = PurePosixPath(source).name if source else PurePosixPath(pages[0]).name
+    return [Artifact(kind="document", path=pages[0], title=title, store="docs", pages=pages, source=source)]

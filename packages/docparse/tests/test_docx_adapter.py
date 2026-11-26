@@ -2,7 +2,10 @@ import pytest
 from pathlib import Path
 from docx import Document as load_docx
 
-from docparse import EditPlan, Replacement, TemplateSchema, TemplateValueError, fill, apply, inspect, to_html
+from docparse import (
+    EditPlan, Replacement, TemplateSchema, TemplateValueError, fill, apply, inspect, to_html, verify_fill,
+    detect_fields,
+)
 from docparse.adapters.docx_adapter import DocxAdapter
 
 
@@ -15,7 +18,7 @@ def test_inspect_gives_stable_ids_runs_and_cells(docx_path: Path) -> None:
     assert [r.text for r in doc.paragraphs[1].runs] == ["신청자: ", "홍길동"]
     assert doc.paragraphs[0].style == "Title"
     table = doc.tables[0]
-    assert (table.rows, table.cols) == (2, 2)
+    assert (table.rows, table.cols, table.anchor) == (2, 2, 3)
     cells = {c.id: c for c in table.cells}
     assert cells["t0r0c1"].text == "{{출장기간}}"
     assert [p.id for p in cells["t0r1c1"].paragraphs] == ["t0r1c1p0", "t0r1c1p1"]
@@ -103,3 +106,47 @@ def test_fill_missing_anchor_or_bad_values_raise(form_docx_path: Path, tmp_path:
         fill(form_docx_path, _form_schema(FORM_FIELDS), {**FORM_VALUES, "금액": "많이"}, tmp_path / "o.docx")
     assert err.value.issues == ("금액: 숫자가 아니다",)
     assert not (tmp_path / "o.docx").exists()
+
+
+def _slot_docx(tmp_path: Path) -> Path:
+    doc = load_docx()
+    para = doc.add_paragraph()
+    para.add_run("성명(").bold = True
+    para.add_run("        ")
+    para.add_run(") 서명")
+    doc.add_paragraph("해당 여부: □ 예 □ 아니오")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "동의"
+    table.cell(0, 1).text = "☐ 동의함 ☐ 동의하지 않음"
+    path = tmp_path / "괄호.docx"
+    doc.save(str(path))
+    return path
+
+
+def test_fill_inline_slot_and_checkbox_keep_surroundings(tmp_path: Path) -> None:
+    source = _slot_docx(tmp_path)
+    candidates = detect_fields(inspect(source))
+    assert [(c.name, c.rule, c.options) for c in candidates] == [
+        ("성명", "inline_slot", ()), ("해당여부", "checkbox", ("예", "아니오")),
+        ("동의", "checkbox", ("동의함", "동의하지 않음")),
+    ]
+    schema = TemplateSchema.model_validate({
+        "template_id": "괄호-v1", "format": "docx", "kind": "blank_form", "source_hash": "h",
+        "fields": [c.to_field().model_dump() for c in candidates],
+    })
+    values = {"성명": "홍길동", "해당여부": "아니오", "동의": "동의함"}
+    after = fill(source, schema, values, tmp_path / "out.docx")
+    texts = after.texts()
+    assert texts["p0"] == "성명(홍길동) 서명"
+    assert texts["p1"] == "해당 여부: □ 예 ■ 아니오"
+    assert texts["t0r0c1p0"] == "■ 동의함 □ 동의하지 않음"
+    assert load_docx(str(tmp_path / "out.docx")).paragraphs[0].runs[0].bold is True
+    assert verify_fill(after, schema, values).ok
+    with pytest.raises(TemplateValueError):
+        fill(source, schema, {**values, "해당여부": "모름"}, tmp_path / "bad.docx")
+
+
+def test_fill_inline_slot_missing_paragraph_raises(tmp_path: Path) -> None:
+    schema = _form_schema([{"name": "x", "locator": {"kind": "inline_slot", "paragraph": "p9", "label": "성명"}}])
+    with pytest.raises(KeyError):
+        fill(_slot_docx(tmp_path), schema, {"x": "a"}, tmp_path / "o.docx")

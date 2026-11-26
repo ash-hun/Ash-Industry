@@ -659,3 +659,12 @@ async def test_goal_turn_undelivered_items_come_again_next_turn(tmp_path):
     assert spoken == [SAID]
     saved = store.get(goal.id)
     assert saved is not None and saved.reported == ["2026:55A"]
+
+
+def test_remove_task_drops_task_and_its_saved_file(tmp_path):
+    svc = _service(schedules_dir=str(tmp_path))
+    svc.ensure_task(ScheduledTask(name="goal-x", schedule="0 9 * * *", prompt="p"))
+    assert (tmp_path / "goal-x.yaml").exists()
+
+    assert svc.remove_task("goal-x") is True and svc.remove_task("goal-x") is False
+    assert svc.list_tasks() == [] and not (tmp_path / "goal-x.yaml").exists()

@@ -1,4 +1,5 @@
 import pytest
+from typing import Any
 from pathlib import Path
 from pypdf import PdfWriter
 from hwpx import HwpxDocument
@@ -9,6 +10,7 @@ from pypdf.generic import NameObject, ArrayObject, FloatObject, TextStringObject
 
 from docs_mcp.docs_server import DocsService, build_server
 from docs_mcp.docs_paths import DocsPaths
+from docparse import SlideSpec
 
 
 def test_list_and_inspect(service: DocsService) -> None:
@@ -27,6 +29,7 @@ def test_plan_then_apply_is_idempotent_and_keeps_source(service: DocsService, ro
     assert service.plan_edit("sub/a.docx", [{"target": "p1", "text": "본문 홍길동"}])["plan_id"] == plan["plan_id"]
     applied = service.apply_edit(plan["plan_id"])
     assert applied["output"] == "sub/a.edited-20261116-090000.docx" and applied["verify"]["ok"]
+    assert applied["preview"]["files"] == [".render/a.edited-20261116-090000/a.edited-20261116-090000-1.png"]
     assert service.apply_edit(plan["plan_id"]) == applied
     assert (root / applied["output"]).exists()
     assert service.inspect_document("sub/a.docx")["paragraphs"][1]["text"] == "본문 {{이름}}"
@@ -53,14 +56,23 @@ def test_render_html_and_missing_renderer(service: DocsService) -> None:
     assert "error" in svc.render_document("sub/a.docx", "pdf")
 
 
-def test_build_server_registers_ten_tools(root: Path) -> None:
+def test_write_succeeds_when_preview_render_fails(root: Path) -> None:
+    from docparse.render.render_service import LibreOfficeRenderer
+
+    svc = DocsService(DocsPaths(root), renderer=LibreOfficeRenderer(soffice="/nonexistent", pdftoppm=None))
+    made = svc.create_document("새.docx", title="제목")
+    assert made["paragraphs"] == 1 and "error" in made["preview"] and (root / "새.docx").exists()
+
+
+def test_build_server_registers_twelve_tools(root: Path) -> None:
     server = build_server(DocsService(DocsPaths(root)))
     tools = {t.name: t for t in server._tool_manager.list_tools()}
     assert set(tools) == {
         "list_documents", "inspect_document", "plan_edit", "apply_edit", "render_document",
         "list_templates", "get_template_schema", "register_template", "fill_template", "detect_fields",
+        "create_document", "make_placeholder_copy",
     }
-    for name in ("apply_edit", "register_template", "fill_template"):
+    for name in ("apply_edit", "register_template", "fill_template", "create_document", "make_placeholder_copy"):
         annotations = tools[name].annotations
         assert annotations is not None and annotations.read_only_hint is False
     for name in ("list_templates", "get_template_schema", "detect_fields"):
@@ -91,6 +103,7 @@ def test_register_get_fill_flow_is_idempotent(service: DocsService, root: Path) 
     ]
     filled = service.fill_template("인사-v1", {"이름": "홍길동"})
     assert filled["path"] == "sub/a.filled-20261116-090000.docx" and filled["verify"] == {"ok": True, "issues": []}
+    assert filled["preview"]["format"] == "png" and filled["preview"]["path"] == filled["path"]
     assert service.fill_template("인사-v1", {"이름": "홍길동"}) == filled
     assert len(list((root / ".templates" / "인사-v1" / "fills").iterdir())) == 1
     assert service.inspect_document(filled["path"])["paragraphs"][1]["text"] == "본문 홍길동"
@@ -237,5 +250,117 @@ def test_pptx_and_pdf_are_listed_inspected_and_filled(service: DocsService, root
     assert service.register_template("신청.pdf", detected["template_id"], "blank_form", fields)["registered"]
     filled = service.fill_template(detected["template_id"], {"성명": "홍길동"})
     assert filled["verify"] == {"ok": True, "issues": []} and filled["path"].endswith(".pdf")
+    assert filled["preview"]["format"] == "pdf" and filled["preview"]["files"][0].endswith(".pdf")
     assert service.inspect_document(filled["path"])["fields"][0]["value"] == "홍길동"
     assert service.plan_edit("신청.pdf", [{"target": "f:성명", "text": "x"}])["issues"] == ["없는 대상: f:성명"]
+
+
+def test_create_document_writes_new_file_once(service: DocsService, root: Path) -> None:
+    slides = [SlideSpec(title="사업 계획", subtitle="2026"), SlideSpec(title="목표", bullets=["매출"])]
+    made = service.create_document("발표/계획.pptx", slides=slides)
+    assert made == {
+        "path": "발표/계획.pptx", "format": "pptx", "paragraphs": 4, "tables": 0, "slides": 2,
+        "preview": {"path": "발표/계획.pptx", "format": "png", "files": [".render/계획/계획-1.png"]},
+    }
+    assert service.create_document("발표/계획.pptx", slides=slides) == made
+    assert "덮어쓰지 않는다" in service.create_document("발표/계획.pptx", slides=slides[:1])["error"]
+    assert "발표/계획.pptx" in [d["path"] for d in service.list_documents()["documents"]]
+    assert service.inspect_document("발표/계획.pptx")["paragraphs"][0]["text"] == "사업 계획"
+    assert "덮어쓰지 않는다" in service.create_document("sub/a.docx", title="x")["error"]
+    assert service.inspect_document("sub/a.docx")["paragraphs"][0]["text"] == "제목"
+
+
+def test_create_document_refuses_bad_path_and_mismatched_content(service: DocsService, root: Path) -> None:
+    for bad in ("../a.docx", ".render/a.docx", "/tmp/a.docx"):
+        assert "error" in service.create_document(bad, title="x")
+    assert "새로 만들 수 있는 형식" in service.create_document("a.hwpx", title="x")["error"]
+    assert "slides 가 없다" in service.create_document("a.pptx", title="x")["error"]
+    assert not (root / "a.pptx").exists()
+
+
+def _big_doc() -> Any:
+    from docparse.document_model import Cell, Document, Table, Paragraph
+
+    def table(i: int, name: str, n: int) -> Table:
+        cells = tuple(Cell(id=f"t{i}r{r}c0", row=r, col=0, text=f"v{r}") for r in range(n))
+        return Table(id=f"t{i}", index=i, rows=n, cols=1, cells=cells, name=name)
+
+    return Document(
+        path="a.xlsx", format="xlsx", paragraphs=(Paragraph(id="p0", text="제목"),),
+        tables=(table(0, "요약", 10), table(1, "원장", 2500), table(2, "부록", 5)),
+    )
+
+
+def test_document_dict_keeps_fitting_tables_and_lists_the_rest() -> None:
+    from docs_mcp.docs_server import document_dict
+
+    out = document_dict(_big_doc(), include_empty=False)
+    assert [t["id"] for t in out["tables"]] == ["t0", "t2"] and out["paragraphs"][0]["text"] == "제목"
+    assert out["tables_omitted"] == [{"id": "t1", "name": "원장", "rows": 2500, "cols": 1, "cells_total": 2500}]
+    assert "table" in out["truncated"]
+    small = document_dict(_big_doc().model_copy(update={"tables": _big_doc().tables[:1]}), include_empty=False)
+    assert "truncated" not in small and "tables_omitted" not in small
+
+
+def test_document_dict_pages_one_table_by_name_or_id() -> None:
+    from docs_mcp.docs_server import document_dict
+
+    first = document_dict(_big_doc(), include_empty=False, table="원장")
+    assert first["paragraphs"] == [] and len(first["tables"][0]["cells"]) == 2000 and first["next_offset"] == 2000
+    rest = document_dict(_big_doc(), include_empty=False, table="t1", offset=2000)
+    assert [c["id"] for c in rest["tables"][0]["cells"]][:1] == ["t1r2000c0"] and "next_offset" not in rest
+    assert len(document_dict(_big_doc(), False, table="t1", offset=-5, limit=0)["tables"][0]["cells"]) == 1
+    assert "없는 표" in document_dict(_big_doc(), include_empty=False, table="없음")["error"]
+
+
+def test_document_dict_marks_readonly_and_spans() -> None:
+    from docparse import Cell, Table, Document, Paragraph
+    from docs_mcp.docs_server import document_dict
+
+    doc = Document(
+        path="a.pptx", format="pptx", paragraphs=(Paragraph(id="s0np0", text="노트", editable=False),),
+        tables=(Table(id="t0", index=0, rows=2, cols=2, anchor=1, cells=(
+            Cell(id="t0r0c0", row=0, col=0, text="성명", merged=True, col_span=2),
+            Cell(id="t0r1c0", row=1, col=0, text="홍길동"),
+        )),),
+    )
+    out = document_dict(doc, include_empty=False)
+    assert out["paragraphs"] == [{"id": "s0np0", "text": "노트", "readonly": True}]
+    assert [c.get("col_span") for c in out["tables"][0]["cells"]] == [2, None]
+    assert out["tables"][0]["anchor"] == 1
+    assert "anchor" not in document_dict(_big_doc(), include_empty=False)["tables"][0]
+
+
+def test_placeholder_copy_then_register_and_fill(service: DocsService, root: Path) -> None:
+    doc = new_docx()
+    doc.add_paragraph("성명(        ) 서명")
+    doc.add_paragraph("□ 예 □ 아니오")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "금액"
+    doc.save(str(root / "빈 양식.docx"))
+    candidates = service.detect_fields("빈 양식.docx")["candidates"]
+    fields = [{k: c[k] for k in ("name", "type", "locator")} for c in candidates if c["rule"] != "checkbox"]
+    made = service.make_placeholder_copy("빈 양식.docx", fields)
+    assert (made["path"], made["placeholders"], made["created"]) == ("빈 양식.template.docx", ["금액", "성명"], True)
+    assert service.make_placeholder_copy("빈 양식.docx", fields)["created"] is False
+    texts = [p["text"] for p in service.inspect_document(made["path"])["paragraphs"]]
+    assert texts[0] == "성명({{성명}}) 서명"
+    assert service.inspect_document("빈 양식.docx")["paragraphs"][0]["text"] == "성명(        ) 서명"
+    registered = service.register_template(made["path"], "빈양식-v1")
+    assert registered["registered"] is True and registered["kind"] == "placeholder"
+    filled = service.fill_template("빈양식-v1", {"성명": "홍길동", "금액": "1000"})
+    assert filled["verify"] == {"ok": True, "issues": []}
+
+
+def test_placeholder_copy_refuses_checkbox_missing_and_conflict(service: DocsService, root: Path) -> None:
+    doc = new_docx()
+    doc.add_paragraph("□ 예 □ 아니오")
+    doc.save(str(root / "칸.docx"))
+    box = {"name": "여부", "type": "choice", "locator": {"kind": "checkbox", "paragraph": "p0", "options": ["예"]}}
+    assert "둘 수 없는 자리" in service.make_placeholder_copy("칸.docx", [box])["error"]
+    missing = {"name": "성명", "locator": {"kind": "inline_slot", "paragraph": "p0", "label": "성명"}}
+    assert service.make_placeholder_copy("칸.docx", [missing])["issues"] == ["성명: p0 에 '성명' 뒤 빈 괄호가 없다"]
+    assert "fields" in service.make_placeholder_copy("칸.docx", [])["error"]
+    (root / "칸.template.docx").write_bytes((root / "칸.docx").read_bytes())
+    anchor = {"name": "x", "locator": {"kind": "anchor_text", "after": "□ 예"}}
+    assert "이미 다른 사본" in service.make_placeholder_copy("칸.docx", [anchor])["error"]
